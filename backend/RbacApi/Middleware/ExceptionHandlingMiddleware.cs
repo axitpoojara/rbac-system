@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using RbacApi.DTOs.Common;
+using Rbac.Application.DTOs.Common;
 
 namespace RbacApi.Middleware;
 

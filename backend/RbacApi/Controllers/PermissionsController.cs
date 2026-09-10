@@ -1,10 +1,9 @@
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RbacApi.Data;
-using RbacApi.DTOs.Common;
-using RbacApi.DTOs.Permissions;
-using RbacApi.Entities;
+using Rbac.Application.DTOs.Common;
+using Rbac.Application.DTOs.Permissions;
+using Rbac.Application.Features.Permissions;
 using RbacApi.Security.Authorization;
 
 namespace RbacApi.Controllers;
@@ -14,97 +13,38 @@ namespace RbacApi.Controllers;
 [Authorize]
 public class PermissionsController : ControllerBase
 {
-    private readonly AppDbContext _context;
+    private readonly ISender _mediator;
 
-    public PermissionsController(AppDbContext context)
+    public PermissionsController(ISender mediator)
     {
-        _context = context;
+        _mediator = mediator;
     }
 
     [HttpGet]
     [HasPermission("Permissions.View")]
     public async Task<ActionResult<ApiResponse<List<PermissionDto>>>> GetAllPermissions()
     {
-        var permissions = await _context.Permissions
-            .OrderBy(p => p.Module)
-            .ThenBy(p => p.Code)
-            .Select(p => new PermissionDto
-            {
-                Id = p.Id,
-                Code = p.Code,
-                Name = p.Name,
-                Module = p.Module,
-                Description = p.Description
-            })
-            .ToListAsync();
-
-        return Ok(ApiResponse<List<PermissionDto>>.Ok(permissions));
+        var result = await _mediator.Send(new GetPermissionsQuery());
+        return Ok(result);
     }
 
     [HttpGet("grouped")]
     [HasPermission("Permissions.View")]
     public async Task<ActionResult<ApiResponse<List<ModulePermissionsDto>>>> GetGroupedPermissions()
     {
-        var permissions = await _context.Permissions
-            .OrderBy(p => p.Module)
-            .ThenBy(p => p.Name)
-            .ToListAsync();
-
-        var grouped = permissions
-            .GroupBy(p => p.Module)
-            .Select(g => new ModulePermissionsDto
-            {
-                Module = g.Key,
-                Permissions = g.Select(p => new PermissionDto
-                {
-                    Id = p.Id,
-                    Code = p.Code,
-                    Name = p.Name,
-                    Module = p.Module,
-                    Description = p.Description
-                }).ToList()
-            })
-            .ToList();
-
-        return Ok(ApiResponse<List<ModulePermissionsDto>>.Ok(grouped));
+        var result = await _mediator.Send(new GetGroupedPermissionsQuery());
+        return Ok(result);
     }
 
     [HttpPost]
     [HasPermission("Permissions.Manage")]
     public async Task<ActionResult<ApiResponse<PermissionDto>>> CreatePermission([FromBody] CreatePermissionDto request)
     {
-        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Module))
+        var result = await _mediator.Send(new CreatePermissionCommand(request));
+        if (!result.Success)
         {
-            return BadRequest(ApiResponse<PermissionDto>.Fail("Code, Name, and Module are required."));
+            return BadRequest(result);
         }
-
-        var exists = await _context.Permissions.AnyAsync(p => p.Code.ToLower() == request.Code.Trim().ToLower());
-        if (exists)
-        {
-            return BadRequest(ApiResponse<PermissionDto>.Fail("A permission with this code already exists."));
-        }
-
-        var permission = new Permission
-        {
-            Id = Guid.NewGuid(),
-            Code = request.Code.Trim(),
-            Name = request.Name.Trim(),
-            Module = request.Module.Trim(),
-            Description = request.Description.Trim()
-        };
-
-        _context.Permissions.Add(permission);
-        await _context.SaveChangesAsync();
-
-        var dto = new PermissionDto
-        {
-            Id = permission.Id,
-            Code = permission.Code,
-            Name = permission.Name,
-            Module = permission.Module,
-            Description = permission.Description
-        };
-
-        return Ok(ApiResponse<PermissionDto>.Ok(dto, "Permission created successfully"));
+        return Ok(result);
     }
 }

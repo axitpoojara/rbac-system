@@ -1,8 +1,9 @@
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using RbacApi.Data;
-using RbacApi.DTOs.Common;
+using Rbac.Application.DTOs.Common;
+using Rbac.Application.DTOs.Dashboard;
+using Rbac.Application.Features.Dashboard;
 
 namespace RbacApi.Controllers;
 
@@ -11,60 +12,17 @@ namespace RbacApi.Controllers;
 [Authorize]
 public class DashboardController : ControllerBase
 {
-    private readonly AppDbContext _context;
+    private readonly ISender _mediator;
 
-    public DashboardController(AppDbContext context)
+    public DashboardController(ISender mediator)
     {
-        _context = context;
+        _mediator = mediator;
     }
 
     [HttpGet("stats")]
     public async Task<ActionResult<ApiResponse<DashboardStatsDto>>> GetStats()
     {
-        var totalUsers = await _context.Users.CountAsync();
-        var activeUsers = await _context.Users.CountAsync(u => u.IsActive);
-        var inactiveUsers = totalUsers - activeUsers;
-        var totalRoles = await _context.Roles.CountAsync();
-        var totalPermissions = await _context.Permissions.CountAsync();
-        var totalMenus = await _context.Menus.CountAsync();
-
-        var recentUsers = await _context.Users
-            .OrderByDescending(u => u.CreatedAtUtc)
-            .Take(5)
-            .Select(u => new
-            {
-                u.Id,
-                u.UserName,
-                u.Email,
-                u.FirstName,
-                u.LastName,
-                u.IsActive,
-                u.CreatedAtUtc
-            })
-            .ToListAsync();
-
-        var stats = new DashboardStatsDto
-        {
-            TotalUsers = totalUsers,
-            ActiveUsers = activeUsers,
-            InactiveUsers = inactiveUsers,
-            TotalRoles = totalRoles,
-            TotalPermissions = totalPermissions,
-            TotalMenus = totalMenus,
-            RecentUsers = recentUsers
-        };
-
-        return Ok(ApiResponse<DashboardStatsDto>.Ok(stats));
+        var result = await _mediator.Send(new GetDashboardStatsQuery());
+        return Ok(result);
     }
-}
-
-public class DashboardStatsDto
-{
-    public int TotalUsers { get; set; }
-    public int ActiveUsers { get; set; }
-    public int InactiveUsers { get; set; }
-    public int TotalRoles { get; set; }
-    public int TotalPermissions { get; set; }
-    public int TotalMenus { get; set; }
-    public object? RecentUsers { get; set; }
 }

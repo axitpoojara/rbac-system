@@ -1,7 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
-using RbacApi.Data;
+using Microsoft.Extensions.DependencyInjection;
+using Rbac.Application.Common.Interfaces;
 
 namespace RbacApi.Security.Authorization;
 
@@ -43,7 +44,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         if (Guid.TryParse(userIdStr, out var userId))
         {
             using var scope = _scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var dbContext = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
 
             var hasPermission = await dbContext.UserRoles
                 .Where(ur => ur.UserId == userId && ur.User.IsActive)

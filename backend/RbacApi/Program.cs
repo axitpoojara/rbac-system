@@ -1,29 +1,26 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using RbacApi.Data;
+using Rbac.Application;
+using Rbac.Application.Common.Interfaces;
+using Rbac.Infrastructure;
+using Rbac.Infrastructure.Persistence;
 using RbacApi.Middleware;
-using RbacApi.Security;
 using RbacApi.Security.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Add DbContext
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=rbac.db"));
+// 1. Add Application & Infrastructure Services (Clean Architecture)
+builder.Services.AddApplicationServices();
+builder.Services.AddInfrastructureServices(builder.Configuration);
 
-// 2. Add Security Services
-builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
-builder.Services.AddScoped<IJwtService, JwtService>();
-
-// 3. Add Dynamic Permission Authorization
+// 2. Add Dynamic Permission Authorization
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
-// 4. Configure JWT Authentication
+// 3. Configure JWT Authentication
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "A_Very_Strong_Enterprise_RBAC_Jwt_Secret_Key_For_Tokens_2026_Min_256_Bits!";
 builder.Services.AddAuthentication(options =>
 {
@@ -47,7 +44,7 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// 5. Configure CORS
+// 4. Configure CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngularClient", policy =>
@@ -62,7 +59,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// 6. Configure Swagger with JWT Support
+// 5. Configure Swagger with JWT Support
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RBAC System API", Version = "v1" });
@@ -94,7 +91,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Seed Database automatically on startup
+// 6. Seed Database automatically on startup
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -102,7 +99,7 @@ using (var scope = app.Services.CreateScope())
     await DbInitializer.SeedAsync(context, hasher);
 }
 
-// Global Exception Handler
+// 7. Global Exception Handler
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 if (app.Environment.IsDevelopment())
