@@ -30,10 +30,5 @@ export const setPasswordGuard: CanActivateFn = () => {
     return false;
   }
 
-  if (!authService.mustChangePassword()) {
-    router.navigate(['/dashboard']);
-    return false;
-  }
-
   return true;
 };

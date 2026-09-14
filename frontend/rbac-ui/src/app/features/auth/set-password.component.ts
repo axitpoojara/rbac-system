@@ -29,9 +29,9 @@ export function passwordMatchValidator(): ValidatorFn {
               <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
             </svg>
           </div>
-          <h2>Set Permanent Password</h2>
+          <h2>Change Password</h2>
           <p class="subtitle">
-            You are logged in with a temporary verification password. Create a strong permanent password to continue.
+            Enter your new password below. You do not need to enter your old password.
           </p>
           
           <div *ngIf="userEmail()" class="user-badge">
@@ -127,14 +127,18 @@ export function passwordMatchValidator(): ValidatorFn {
           </div>
 
           <button type="submit" class="btn btn-primary btn-block" [disabled]="loading()">
-            <span *ngIf="!loading()">Set Password & Access Portal</span>
+            <span *ngIf="!loading()">Change Password</span>
             <span *ngIf="loading()">Updating Password...</span>
           </button>
         </form>
 
         <div class="footer-actions">
+          <button type="button" class="btn-link" (click)="onBack()">
+            ← Back to Dashboard
+          </button>
+          <span style="margin: 0 8px; color: #94a3b8;">|</span>
           <button type="button" class="btn-link" (click)="onLogout()">
-            Sign out & return to login
+            Sign out
           </button>
         </div>
       </div>
@@ -419,6 +423,10 @@ export class SetPasswordComponent {
         this.errorMessage.set(msg);
       }
     });
+  }
+
+  onBack(): void {
+    this.router.navigate(['/dashboard']);
   }
 
   onLogout(): void {

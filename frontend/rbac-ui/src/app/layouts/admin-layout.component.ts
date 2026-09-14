@@ -156,6 +156,15 @@ import { NavMenuItem } from '../core/models/rbac.models';
               </div>
             </div>
 
+            <!-- Change Password Button -->
+            <a routerLink="/set-password" class="btn-topbar-password" title="Change Password">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span>Change Password</span>
+            </a>
+
             <!-- Logout Button -->
             <button class="btn-topbar-logout" (click)="logout()" title="Securely Sign Out">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -195,6 +204,26 @@ import { NavMenuItem } from '../core/models/rbac.models';
       font-size: 0.9rem;
       cursor: pointer;
       opacity: 0.7;
+    }
+    .btn-topbar-password {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.825rem;
+      font-weight: 600;
+      color: #4f46e5;
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-topbar-password:hover {
+      background: #e0e7ff;
+      border-color: #a5b4fc;
+      color: #3730a3;
     }
     .btn-close:hover {
       opacity: 1;
