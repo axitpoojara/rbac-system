@@ -171,15 +171,20 @@ export function userNameOrEmailValidator(): ValidatorFn {
             </p>
           </div>
 
-          <!-- Success Alert -->
+          <!-- Success Alert: Informs user that password was emailed -->
           <div *ngIf="tempSuccess()" class="alert-box success">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+              <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
             <div>
-              <strong>Email Sent!</strong>
-              <div class="alert-details">{{ tempSuccess() }}</div>
+              <strong>Temporary Password Sent!</strong>
+              <div class="alert-details">
+                A temporary password has been sent to <strong>{{ sentEmail() }}</strong>. Please check your email inbox (and spam folder) to retrieve it.
+              </div>
+              <button type="button" class="btn-goto-signin" (click)="setTab('signin')">
+                Proceed to Sign In &rarr;
+              </button>
             </div>
           </div>
 
@@ -426,6 +431,24 @@ export function userNameOrEmailValidator(): ValidatorFn {
       color: #166534;
       border: 1px solid #bbf7d0;
     }
+    .btn-goto-signin {
+      margin-top: 0.6rem;
+      background: #16a34a;
+      color: #ffffff;
+      border: none;
+      font-size: 0.775rem;
+      font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background-color 0.15s ease;
+    }
+    .btn-goto-signin:hover {
+      background: #15803d;
+    }
     .alert-details {
       font-size: 0.8rem;
       margin-top: 0.2rem;
@@ -555,7 +578,8 @@ export class LoginComponent {
 
   tempLoading = signal(false);
   tempError = signal<string | null>(null);
-  tempSuccess = signal<string | null>(null);
+  tempSuccess = signal<boolean>(false);
+  sentEmail = signal<string>('');
 
   constructor() {
     this.loginForm.valueChanges.subscribe(() => {
@@ -691,15 +715,16 @@ export class LoginComponent {
 
     this.tempLoading.set(true);
     this.tempError.set(null);
-    this.tempSuccess.set(null);
+    this.tempSuccess.set(false);
 
     this.authService.requestTemporaryPassword(email).subscribe({
       next: (res) => {
         this.tempLoading.set(false);
         if (res.success) {
-          this.toastService.success('Temporary password sent! Check your inbox or dev console.');
-          this.tempSuccess.set(`A temporary verification password was generated for ${email}. (In local dev, see the backend terminal logs).`);
-          // Prepopulate sign-in form with the email
+          this.sentEmail.set(email);
+          this.tempSuccess.set(true);
+          this.toastService.success('Temporary password sent to your email!');
+          // Prepopulate only email in sign-in form; password remains empty
           this.loginForm.patchValue({
             userNameOrEmail: email,
             password: ''

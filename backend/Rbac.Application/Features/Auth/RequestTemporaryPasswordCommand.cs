@@ -117,6 +117,6 @@ public class RequestTemporaryPasswordCommandHandler : IRequestHandler<RequestTem
         // Send email with temporary password
         await _emailService.SendTemporaryPasswordEmailAsync(user.Email, user.UserName, tempPassword, cancellationToken);
 
-        return ApiResponse<bool>.Ok(true, "A temporary password has been sent to your email. Please check your inbox (or backend logs in dev) to log in.");
+        return ApiResponse<bool>.Ok(true, "A temporary password has been sent to your email address. Please check your inbox.");
     }
 }

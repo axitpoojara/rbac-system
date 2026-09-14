@@ -27,7 +27,7 @@ public class EmailService : IEmailService
         var smtpPortStr = _configuration["EmailSettings:SmtpPort"];
         var smtpUser = _configuration["EmailSettings:SmtpUser"];
         var smtpPass = _configuration["EmailSettings:SmtpPassword"];
-        var senderEmail = _configuration["EmailSettings:SenderEmail"] ?? "axitpoojara8899@gmail.com";
+        var senderEmail = _configuration["EmailSettings:SenderEmail"] ?? "axitpoojara1501@gmail.com";
         var senderName = _configuration["EmailSettings:SenderName"] ?? "Enterprise RBAC Security";
 
         var emailSubject = "Your Temporary Access Password - Enterprise RBAC";
