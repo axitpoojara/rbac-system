@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Auth;
 using Rbac.Application.DTOs.Common;
 using Rbac.Domain.Entities;
@@ -11,16 +12,16 @@ public record RequestTemporaryPasswordCommand(RequestTempPasswordRequest Request
 
 public class RequestTemporaryPasswordCommandHandler : IRequestHandler<RequestTemporaryPasswordCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IEmailService _emailService;
 
     public RequestTemporaryPasswordCommandHandler(
-        IAppDbContext context,
+        IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         IEmailService emailService)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _emailService = emailService;
     }
@@ -39,9 +40,7 @@ public class RequestTemporaryPasswordCommandHandler : IRequestHandler<RequestTem
             return ApiResponse<bool>.Fail("Please enter a valid email address.");
         }
 
-        var user = await _context.Users
-            .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail, cancellationToken);
+        var user = await _unitOfWork.Users.GetByEmailAsync(normalizedEmail, cancellationToken);
 
         bool isNewUser = false;
         if (user == null)
@@ -58,13 +57,13 @@ public class RequestTemporaryPasswordCommandHandler : IRequestHandler<RequestTem
             var baseUsername = cleanPrefix;
             var userName = baseUsername;
             int counter = 1;
-            while (await _context.Users.AnyAsync(u => u.UserName.ToLower() == userName.ToLower(), cancellationToken))
+            while (!await _unitOfWork.Users.IsUserNameUniqueAsync(userName, null, cancellationToken))
             {
                 userName = $"{baseUsername}{counter++}";
             }
 
-            var defaultRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "Employee", cancellationToken)
-                              ?? await _context.Roles.FirstOrDefaultAsync(cancellationToken);
+            var defaultRole = await _unitOfWork.Roles.GetByNameAsync("Employee", cancellationToken)
+                              ?? await _unitOfWork.Roles.Query(asNoTracking: true).FirstOrDefaultAsync(cancellationToken);
 
             user = new User
             {
@@ -83,7 +82,7 @@ public class RequestTemporaryPasswordCommandHandler : IRequestHandler<RequestTem
                 user.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = defaultRole.Id });
             }
 
-            _context.Users.Add(user);
+            await _unitOfWork.Users.AddAsync(user, cancellationToken);
         }
         else
         {
@@ -100,19 +99,20 @@ public class RequestTemporaryPasswordCommandHandler : IRequestHandler<RequestTem
         user.TemporaryPasswordExpiresAtUtc = DateTime.UtcNow.AddMinutes(30);
         user.UpdatedAtUtc = DateTime.UtcNow;
 
-        _context.AuditLogs.Add(new AuditLog
+        if (!isNewUser)
         {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            UserName = user.UserName,
-            Action = isNewUser ? "SelfRegisterTempPassword" : "RequestTempPassword",
-            EntityName = "User",
-            EntityId = user.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"Temporary password generated for {user.Email} (expires in 30 minutes)."
-        });
+            _unitOfWork.Users.Update(user);
+        }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            user.UserName,
+            isNewUser ? "SelfRegisterTempPassword" : "RequestTempPassword",
+            "User",
+            user.Id.ToString(),
+            $"Temporary password generated for {user.Email} (expires in 30 minutes).",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Send email with temporary password
         await _emailService.SendTemporaryPasswordEmailAsync(user.Email, user.UserName, tempPassword, cancellationToken);

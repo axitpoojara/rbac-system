@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Auth;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
@@ -12,13 +13,13 @@ public record LoginCommand(LoginRequest Request) : IRequest<ApiResponse<AuthResp
 
 public class LoginCommandHandler : IRequestHandler<LoginCommand, ApiResponse<AuthResponse>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtService _jwtService;
 
-    public LoginCommandHandler(IAppDbContext context, IPasswordHasher passwordHasher, IJwtService jwtService)
+    public LoginCommandHandler(IUnitOfWork unitOfWork, IPasswordHasher passwordHasher, IJwtService jwtService)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _jwtService = jwtService;
     }
@@ -32,7 +33,7 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, ApiResponse<Aut
         }
 
         var normalizedInput = model.UserNameOrEmail.Trim().ToLower();
-        var user = await _context.Users
+        var user = await _unitOfWork.Users.Query(asNoTracking: true)
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                     .ThenInclude(r => r.RolePermissions)
@@ -64,8 +65,8 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, ApiResponse<Aut
         var accessToken = _jwtService.GenerateAccessToken(user, roles, permissions);
         var refreshToken = _jwtService.GenerateRefreshToken(user.Id);
 
-        _context.RefreshTokens.Add(refreshToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.RefreshTokens.AddAsync(refreshToken, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var response = new AuthResponse
         {

@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 
 namespace Rbac.Application.Features.Users;
@@ -9,11 +9,11 @@ public record DeleteUserCommand(Guid Id, Guid? CurrentUserId, string? CurrentUse
 
 public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public DeleteUserCommandHandler(IAppDbContext context)
+    public DeleteUserCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(DeleteUserCommand command, CancellationToken cancellationToken)
@@ -24,7 +24,7 @@ public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand, ApiRe
             return ApiResponse<bool>.Fail("You cannot delete your own account.");
         }
 
-        var user = await _context.Users
+        var user = await _unitOfWork.Users.Query(asNoTracking: false)
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
@@ -44,19 +44,17 @@ public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand, ApiRe
         user.DeletedBy = command.CurrentUserName ?? "Admin";
         user.IsActive = false;
 
-        _context.AuditLogs.Add(new Domain.Entities.AuditLog
-        {
-            Id = Guid.NewGuid(),
-            UserId = command.CurrentUserId,
-            UserName = command.CurrentUserName ?? "Admin",
-            Action = "SoftDelete",
-            EntityName = "User",
-            EntityId = user.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"User '{user.UserName}' ({user.Email}) was soft-deleted."
-        });
+        _unitOfWork.Users.Update(user);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            command.CurrentUserName ?? "Admin",
+            "SoftDelete",
+            "User",
+            user.Id.ToString(),
+            $"User '{user.UserName}' ({user.Email}) was soft-deleted.",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "User deleted successfully");
     }

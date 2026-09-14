@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Permissions;
 using Rbac.Domain.Entities;
@@ -11,11 +10,11 @@ public record CreatePermissionCommand(CreatePermissionDto Request) : IRequest<Ap
 
 public class CreatePermissionCommandHandler : IRequestHandler<CreatePermissionCommand, ApiResponse<PermissionDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public CreatePermissionCommandHandler(IAppDbContext context)
+    public CreatePermissionCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<PermissionDto>> Handle(CreatePermissionCommand command, CancellationToken cancellationToken)
@@ -26,7 +25,7 @@ public class CreatePermissionCommandHandler : IRequestHandler<CreatePermissionCo
             return ApiResponse<PermissionDto>.Fail("Code, Name, and Module are required.");
         }
 
-        var exists = await _context.Permissions.AnyAsync(p => p.Code.ToLower() == request.Code.Trim().ToLower(), cancellationToken);
+        var exists = await _unitOfWork.Permissions.AnyAsync(p => p.Code.ToLower() == request.Code.Trim().ToLower(), cancellationToken);
         if (exists)
         {
             return ApiResponse<PermissionDto>.Fail("A permission with this code already exists.");
@@ -41,8 +40,8 @@ public class CreatePermissionCommandHandler : IRequestHandler<CreatePermissionCo
             Description = request.Description.Trim()
         };
 
-        _context.Permissions.Add(permission);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.Permissions.AddAsync(permission, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var dto = new PermissionDto
         {

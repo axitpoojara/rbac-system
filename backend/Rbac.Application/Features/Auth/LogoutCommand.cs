@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 
 namespace Rbac.Application.Features.Auth;
@@ -9,25 +8,17 @@ public record LogoutCommand(Guid UserId) : IRequest<ApiResponse<bool>>;
 
 public class LogoutCommandHandler : IRequestHandler<LogoutCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public LogoutCommandHandler(IAppDbContext context)
+    public LogoutCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(LogoutCommand request, CancellationToken cancellationToken)
     {
-        var userTokens = await _context.RefreshTokens
-            .Where(rt => rt.UserId == request.UserId && rt.RevokedAtUtc == null && rt.ExpiresAtUtc > DateTime.UtcNow)
-            .ToListAsync(cancellationToken);
-
-        foreach (var token in userTokens)
-        {
-            token.RevokedAtUtc = DateTime.UtcNow;
-        }
-
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.RefreshTokens.RevokeUserTokensAsync(request.UserId, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return ApiResponse<bool>.Ok(true, "Logged out successfully");
     }
 }

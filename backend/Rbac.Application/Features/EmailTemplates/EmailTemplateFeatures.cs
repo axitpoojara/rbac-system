@@ -1,7 +1,8 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.EmailTemplates;
 using Rbac.Domain.Entities;
@@ -13,17 +14,16 @@ public record GetEmailTemplatesQuery : IRequest<ApiResponse<List<EmailTemplateDt
 
 public class GetEmailTemplatesQueryHandler : IRequestHandler<GetEmailTemplatesQuery, ApiResponse<List<EmailTemplateDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetEmailTemplatesQueryHandler(IAppDbContext context)
+    public GetEmailTemplatesQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<List<EmailTemplateDto>>> Handle(GetEmailTemplatesQuery request, CancellationToken cancellationToken)
     {
-        var templates = await _context.EmailTemplates
-            .AsNoTracking()
+        var templates = await _unitOfWork.EmailTemplates.Query(asNoTracking: true)
             .OrderBy(t => t.IsSystemTemplate ? 0 : 1)
             .ThenBy(t => t.Name)
             .Select(t => new EmailTemplateDto
@@ -53,18 +53,16 @@ public record GetEmailTemplateByIdQuery(Guid Id) : IRequest<ApiResponse<EmailTem
 
 public class GetEmailTemplateByIdQueryHandler : IRequestHandler<GetEmailTemplateByIdQuery, ApiResponse<EmailTemplateDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetEmailTemplateByIdQueryHandler(IAppDbContext context)
+    public GetEmailTemplateByIdQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<EmailTemplateDto>> Handle(GetEmailTemplateByIdQuery request, CancellationToken cancellationToken)
     {
-        var template = await _context.EmailTemplates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Id == request.Id, cancellationToken);
+        var template = await _unitOfWork.EmailTemplates.GetByIdAsync(request.Id, cancellationToken);
 
         if (template == null)
         {
@@ -98,11 +96,11 @@ public record CreateEmailTemplateCommand(CreateEmailTemplateDto Dto, string? Cur
 
 public class CreateEmailTemplateCommandHandler : IRequestHandler<CreateEmailTemplateCommand, ApiResponse<EmailTemplateDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public CreateEmailTemplateCommandHandler(IAppDbContext context)
+    public CreateEmailTemplateCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<EmailTemplateDto>> Handle(CreateEmailTemplateCommand command, CancellationToken cancellationToken)
@@ -126,9 +124,8 @@ public class CreateEmailTemplateCommandHandler : IRequestHandler<CreateEmailTemp
         }
 
         var cleanKey = dto.TemplateKey.Trim();
-        var exists = await _context.EmailTemplates
-            .IgnoreQueryFilters()
-            .AnyAsync(t => t.TemplateKey.ToLower() == cleanKey.ToLower() && !t.IsDeleted, cancellationToken);
+        var exists = await _unitOfWork.EmailTemplates.AnyAsync(
+            t => t.TemplateKey.ToLower() == cleanKey.ToLower() && !t.IsDeleted, cancellationToken);
 
         if (exists)
         {
@@ -150,19 +147,17 @@ public class CreateEmailTemplateCommandHandler : IRequestHandler<CreateEmailTemp
             CreatedBy = command.CurrentUser ?? "System"
         };
 
-        _context.EmailTemplates.Add(template);
+        await _unitOfWork.EmailTemplates.AddAsync(template, cancellationToken);
 
-        _context.AuditLogs.Add(new AuditLog
-        {
-            UserName = command.CurrentUser,
-            Action = "CREATE",
-            EntityName = "EmailTemplate",
-            EntityId = template.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"Created email template '{template.Name}' ({template.TemplateKey})"
-        });
+        await _unitOfWork.AuditLogs.LogAsync(
+            command.CurrentUser ?? "System",
+            "CREATE",
+            "EmailTemplate",
+            template.Id.ToString(),
+            $"Created email template '{template.Name}' ({template.TemplateKey})",
+            cancellationToken);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var resultDto = new EmailTemplateDto
         {
@@ -189,17 +184,16 @@ public record UpdateEmailTemplateCommand(Guid Id, UpdateEmailTemplateDto Dto, st
 
 public class UpdateEmailTemplateCommandHandler : IRequestHandler<UpdateEmailTemplateCommand, ApiResponse<EmailTemplateDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public UpdateEmailTemplateCommandHandler(IAppDbContext context)
+    public UpdateEmailTemplateCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<EmailTemplateDto>> Handle(UpdateEmailTemplateCommand command, CancellationToken cancellationToken)
     {
-        var template = await _context.EmailTemplates
-            .FirstOrDefaultAsync(t => t.Id == command.Id, cancellationToken);
+        var template = await _unitOfWork.EmailTemplates.GetByIdAsync(command.Id, cancellationToken);
 
         if (template == null)
         {
@@ -229,17 +223,17 @@ public class UpdateEmailTemplateCommandHandler : IRequestHandler<UpdateEmailTemp
         template.UpdatedAtUtc = DateTime.UtcNow;
         template.UpdatedBy = command.CurrentUser ?? "System";
 
-        _context.AuditLogs.Add(new AuditLog
-        {
-            UserName = command.CurrentUser,
-            Action = "UPDATE",
-            EntityName = "EmailTemplate",
-            EntityId = template.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"Updated email template '{template.Name}' ({template.TemplateKey})"
-        });
+        _unitOfWork.EmailTemplates.Update(template);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            command.CurrentUser ?? "System",
+            "UPDATE",
+            "EmailTemplate",
+            template.Id.ToString(),
+            $"Updated email template '{template.Name}' ({template.TemplateKey})",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var resultDto = new EmailTemplateDto
         {
@@ -268,17 +262,16 @@ public record DeleteEmailTemplateCommand(Guid Id, string? CurrentUser = null)
 
 public class DeleteEmailTemplateCommandHandler : IRequestHandler<DeleteEmailTemplateCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public DeleteEmailTemplateCommandHandler(IAppDbContext context)
+    public DeleteEmailTemplateCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(DeleteEmailTemplateCommand command, CancellationToken cancellationToken)
     {
-        var template = await _context.EmailTemplates
-            .FirstOrDefaultAsync(t => t.Id == command.Id, cancellationToken);
+        var template = await _unitOfWork.EmailTemplates.GetByIdAsync(command.Id, cancellationToken);
 
         if (template == null)
         {
@@ -294,17 +287,17 @@ public class DeleteEmailTemplateCommandHandler : IRequestHandler<DeleteEmailTemp
         template.DeletedAtUtc = DateTime.UtcNow;
         template.DeletedBy = command.CurrentUser ?? "System";
 
-        _context.AuditLogs.Add(new AuditLog
-        {
-            UserName = command.CurrentUser,
-            Action = "DELETE",
-            EntityName = "EmailTemplate",
-            EntityId = template.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"Deleted email template '{template.Name}' ({template.TemplateKey})"
-        });
+        _unitOfWork.EmailTemplates.Update(template);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            command.CurrentUser ?? "System",
+            "DELETE",
+            "EmailTemplate",
+            template.Id.ToString(),
+            $"Deleted email template '{template.Name}' ({template.TemplateKey})",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return ApiResponse<bool>.Ok(true, "Email template deleted successfully.");
     }
 }
@@ -337,7 +330,6 @@ public class SendTestEmailCommandHandler : IRequestHandler<SendTestEmailCommand,
             return ApiResponse<bool>.Fail("Email body HTML is required.");
         }
 
-        // Default sample data dictionary for placeholder replacement during preview/test send
         var samplePlaceholders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             { "UserName", "Alex Morgan" },

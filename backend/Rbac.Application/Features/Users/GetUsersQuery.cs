@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
 
@@ -15,16 +15,16 @@ public record GetUsersQuery(
 
 public class GetUsersQueryHandler : IRequestHandler<GetUsersQuery, ApiResponse<PagedResult<UserDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetUsersQueryHandler(IAppDbContext context)
+    public GetUsersQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<PagedResult<UserDto>>> Handle(GetUsersQuery request, CancellationToken cancellationToken)
     {
-        var query = _context.Users
+        var query = _unitOfWork.Users.Query(asNoTracking: true)
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
             .AsNoTracking();

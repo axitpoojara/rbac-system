@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 
 namespace Rbac.Application.Features.Roles;
@@ -9,16 +9,16 @@ public record DeleteRoleCommand(Guid Id, string? CurrentUserName = null) : IRequ
 
 public class DeleteRoleCommandHandler : IRequestHandler<DeleteRoleCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public DeleteRoleCommandHandler(IAppDbContext context)
+    public DeleteRoleCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(DeleteRoleCommand request, CancellationToken cancellationToken)
     {
-        var role = await _context.Roles
+        var role = await _unitOfWork.Roles.Query(asNoTracking: false)
             .Include(r => r.UserRoles)
             .FirstOrDefaultAsync(r => r.Id == request.Id, cancellationToken);
 
@@ -41,18 +41,17 @@ public class DeleteRoleCommandHandler : IRequestHandler<DeleteRoleCommand, ApiRe
         role.DeletedAtUtc = DateTime.UtcNow;
         role.DeletedBy = request.CurrentUserName ?? "Admin";
 
-        _context.AuditLogs.Add(new Domain.Entities.AuditLog
-        {
-            Id = Guid.NewGuid(),
-            UserName = request.CurrentUserName ?? "Admin",
-            Action = "SoftDelete",
-            EntityName = "Role",
-            EntityId = role.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"Role '{role.Name}' was soft-deleted."
-        });
+        _unitOfWork.Roles.Update(role);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            request.CurrentUserName ?? "Admin",
+            "SoftDelete",
+            "Role",
+            role.Id.ToString(),
+            $"Role '{role.Name}' was soft-deleted.",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "Role deleted successfully");
     }

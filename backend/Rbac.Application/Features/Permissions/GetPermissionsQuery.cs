@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Permissions;
 
@@ -10,16 +10,16 @@ public record GetPermissionsQuery : IRequest<ApiResponse<List<PermissionDto>>>;
 
 public class GetPermissionsQueryHandler : IRequestHandler<GetPermissionsQuery, ApiResponse<List<PermissionDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetPermissionsQueryHandler(IAppDbContext context)
+    public GetPermissionsQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<List<PermissionDto>>> Handle(GetPermissionsQuery request, CancellationToken cancellationToken)
     {
-        var permissions = await _context.Permissions
+        var permissions = await _unitOfWork.Permissions.Query(asNoTracking: true)
             .OrderBy(p => p.Module)
             .ThenBy(p => p.Code)
             .Select(p => new PermissionDto

@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
 
@@ -10,20 +9,16 @@ public record GetUserByIdQuery(Guid Id) : IRequest<ApiResponse<UserDto>>;
 
 public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, ApiResponse<UserDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetUserByIdQueryHandler(IAppDbContext context)
+    public GetUserByIdQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<UserDto>> Handle(GetUserByIdQuery request, CancellationToken cancellationToken)
     {
-        var user = await _context.Users
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == request.Id, cancellationToken);
+        var user = await _unitOfWork.Users.GetByIdWithRolesAsync(request.Id, cancellationToken);
 
         if (user == null)
         {

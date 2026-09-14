@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
 using Rbac.Domain.Entities;
@@ -11,12 +12,12 @@ public record CreateUserCommand(CreateUserDto Request, string CreatedBy) : IRequ
 
 public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, ApiResponse<UserDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
 
-    public CreateUserCommandHandler(IAppDbContext context, IPasswordHasher passwordHasher)
+    public CreateUserCommandHandler(IUnitOfWork unitOfWork, IPasswordHasher passwordHasher)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
     }
 
@@ -28,11 +29,10 @@ public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, ApiRe
             return ApiResponse<UserDto>.Fail("Username, email, and password are required.");
         }
 
-        var exists = await _context.Users.AnyAsync(u =>
-            u.UserName.ToLower() == request.UserName.Trim().ToLower() ||
-            u.Email.ToLower() == request.Email.Trim().ToLower(), cancellationToken);
+        var isUserNameUnique = await _unitOfWork.Users.IsUserNameUniqueAsync(request.UserName.Trim(), null, cancellationToken);
+        var isEmailUnique = await _unitOfWork.Users.IsEmailUniqueAsync(request.Email.Trim(), null, cancellationToken);
 
-        if (exists)
+        if (!isUserNameUnique || !isEmailUnique)
         {
             return ApiResponse<UserDto>.Fail("A user with this username or email already exists.");
         }
@@ -52,7 +52,7 @@ public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, ApiRe
 
         if (request.RoleIds != null && request.RoleIds.Any())
         {
-            var validRoleIds = await _context.Roles
+            var validRoleIds = await _unitOfWork.Roles.Query(asNoTracking: true)
                 .Where(r => request.RoleIds.Contains(r.Id))
                 .Select(r => r.Id)
                 .ToListAsync(cancellationToken);
@@ -63,10 +63,10 @@ public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, ApiRe
             }
         }
 
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.Users.AddAsync(user, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var roles = await _context.Roles
+        var roles = await _unitOfWork.Roles.Query(asNoTracking: true)
             .Where(r => user.UserRoles.Select(ur => ur.RoleId).Contains(r.Id))
             .Select(r => r.Name)
             .ToListAsync(cancellationToken);

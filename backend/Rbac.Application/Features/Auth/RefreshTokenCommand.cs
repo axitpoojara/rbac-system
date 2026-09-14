@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Auth;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
@@ -12,12 +13,12 @@ public record RefreshTokenCommand(RefreshTokenRequest Request) : IRequest<ApiRes
 
 public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, ApiResponse<AuthResponse>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IJwtService _jwtService;
 
-    public RefreshTokenCommandHandler(IAppDbContext context, IJwtService jwtService)
+    public RefreshTokenCommandHandler(IUnitOfWork unitOfWork, IJwtService jwtService)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
         _jwtService = jwtService;
     }
 
@@ -29,7 +30,7 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             return ApiResponse<AuthResponse>.Fail("Refresh token is required.");
         }
 
-        var tokenRecord = await _context.RefreshTokens
+        var tokenRecord = await _unitOfWork.RefreshTokens.Query(asNoTracking: false)
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
@@ -44,15 +45,8 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
 
         if (tokenRecord.IsRevoked)
         {
-            var activeTokens = await _context.RefreshTokens
-                .Where(rt => rt.UserId == tokenRecord.UserId && rt.RevokedAtUtc == null)
-                .ToListAsync(cancellationToken);
-
-            foreach (var t in activeTokens)
-            {
-                t.RevokedAtUtc = DateTime.UtcNow;
-            }
-            await _context.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.RefreshTokens.RevokeUserTokensAsync(tokenRecord.UserId, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             return ApiResponse<AuthResponse>.Fail("Refresh token compromised or revoked. Please log in again.");
         }
@@ -81,8 +75,9 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
         tokenRecord.RevokedAtUtc = DateTime.UtcNow;
         tokenRecord.ReplacedByToken = newRefreshToken.Token;
 
-        _context.RefreshTokens.Add(newRefreshToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        _unitOfWork.RefreshTokens.Update(tokenRecord);
+        await _unitOfWork.RefreshTokens.AddAsync(newRefreshToken, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var response = new AuthResponse
         {

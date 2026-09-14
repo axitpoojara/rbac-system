@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 
 namespace Rbac.Application.Features.Menus;
@@ -9,25 +8,24 @@ public record DeleteMenuCommand(Guid Id, string? CurrentUserName = null) : IRequ
 
 public class DeleteMenuCommandHandler : IRequestHandler<DeleteMenuCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public DeleteMenuCommandHandler(IAppDbContext context)
+    public DeleteMenuCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(DeleteMenuCommand request, CancellationToken cancellationToken)
     {
-        var menu = await _context.Menus
-            .Include(m => m.SubMenus)
-            .FirstOrDefaultAsync(m => m.Id == request.Id, cancellationToken);
+        var menu = await _unitOfWork.Menus.GetByIdAsync(request.Id, cancellationToken);
 
         if (menu == null)
         {
             return ApiResponse<bool>.Fail("Menu not found");
         }
 
-        if (menu.SubMenus.Any())
+        var hasChildren = await _unitOfWork.Menus.AnyAsync(m => m.ParentId == request.Id, cancellationToken);
+        if (hasChildren)
         {
             return ApiResponse<bool>.Fail("Cannot delete menu that has child menus. Delete or reassign children first.");
         }
@@ -36,18 +34,17 @@ public class DeleteMenuCommandHandler : IRequestHandler<DeleteMenuCommand, ApiRe
         menu.DeletedAtUtc = DateTime.UtcNow;
         menu.DeletedBy = request.CurrentUserName ?? "Admin";
 
-        _context.AuditLogs.Add(new Domain.Entities.AuditLog
-        {
-            Id = Guid.NewGuid(),
-            UserName = request.CurrentUserName ?? "Admin",
-            Action = "SoftDelete",
-            EntityName = "Menu",
-            EntityId = menu.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"Menu item '{menu.Title}' ({menu.Route}) was soft-deleted."
-        });
+        _unitOfWork.Menus.Update(menu);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            request.CurrentUserName ?? "Admin",
+            "SoftDelete",
+            "Menu",
+            menu.Id.ToString(),
+            $"Menu item '{menu.Title}' ({menu.Route}) was soft-deleted.",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "Menu item deleted successfully");
     }

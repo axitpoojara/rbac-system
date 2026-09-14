@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Menus;
 using Rbac.Domain.Entities;
@@ -11,11 +11,11 @@ public record GetUserNavMenusQuery(Guid UserId, bool IsSuperAdmin) : IRequest<Ap
 
 public class GetUserNavMenusQueryHandler : IRequestHandler<GetUserNavMenusQuery, ApiResponse<List<NavMenuItemDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetUserNavMenusQueryHandler(IAppDbContext context)
+    public GetUserNavMenusQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<List<NavMenuItemDto>>> Handle(GetUserNavMenusQuery request, CancellationToken cancellationToken)
@@ -24,14 +24,14 @@ public class GetUserNavMenusQueryHandler : IRequestHandler<GetUserNavMenusQuery,
 
         if (request.IsSuperAdmin)
         {
-            accessibleMenus = await _context.Menus
+            accessibleMenus = await _unitOfWork.Menus.Query(asNoTracking: true)
                 .Where(m => m.IsActive)
                 .OrderBy(m => m.DisplayOrder)
                 .ToListAsync(cancellationToken);
         }
         else
         {
-            var userPermissions = await _context.UserRoles
+            var userPermissions = await _unitOfWork.UserRoles.Query(asNoTracking: true)
                 .Where(ur => ur.UserId == request.UserId && ur.User.IsActive)
                 .SelectMany(ur => ur.Role.RolePermissions)
                 .Select(rp => rp.Permission.Code)
@@ -40,7 +40,7 @@ public class GetUserNavMenusQueryHandler : IRequestHandler<GetUserNavMenusQuery,
 
             var permSet = new HashSet<string>(userPermissions, StringComparer.OrdinalIgnoreCase);
 
-            var roleMenus = await _context.UserRoles
+            var roleMenus = await _unitOfWork.UserRoles.Query(asNoTracking: true)
                 .Where(ur => ur.UserId == request.UserId && ur.User.IsActive)
                 .SelectMany(ur => ur.Role.RoleMenus)
                 .Select(rm => rm.Menu)
@@ -56,7 +56,7 @@ public class GetUserNavMenusQueryHandler : IRequestHandler<GetUserNavMenusQuery,
             var parentIds = accessibleMenus.Where(m => m.ParentId.HasValue).Select(m => m.ParentId!.Value).Distinct().ToList();
             if (parentIds.Any())
             {
-                var parents = await _context.Menus
+                var parents = await _unitOfWork.Menus.Query(asNoTracking: true)
                     .Where(m => parentIds.Contains(m.Id) && m.IsActive)
                     .ToListAsync(cancellationToken);
 

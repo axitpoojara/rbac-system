@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Auth;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
@@ -11,21 +10,16 @@ public record GetCurrentUserQuery(Guid UserId) : IRequest<ApiResponse<AuthRespon
 
 public class GetCurrentUserQueryHandler : IRequestHandler<GetCurrentUserQuery, ApiResponse<AuthResponse>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetCurrentUserQueryHandler(IAppDbContext context)
+    public GetCurrentUserQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<AuthResponse>> Handle(GetCurrentUserQuery request, CancellationToken cancellationToken)
     {
-        var user = await _context.Users
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                    .ThenInclude(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
-            .FirstOrDefaultAsync(u => u.Id == request.UserId, cancellationToken);
+        var user = await _unitOfWork.Users.GetByIdWithRolesAndPermissionsAsync(request.UserId, cancellationToken);
 
         if (user == null || !user.IsActive)
         {

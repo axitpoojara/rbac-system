@@ -1,10 +1,11 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Mail;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 
 namespace Rbac.Infrastructure.Services;
 
@@ -12,16 +13,16 @@ public class EmailService : IEmailService
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<EmailService> _logger;
-    private readonly IAppDbContext _context;
+    private readonly IEmailTemplateRepository _emailTemplateRepository;
 
     public EmailService(
         IConfiguration configuration, 
         ILogger<EmailService> logger,
-        IAppDbContext context)
+        IEmailTemplateRepository emailTemplateRepository)
     {
         _configuration = configuration;
         _logger = logger;
-        _context = context;
+        _emailTemplateRepository = emailTemplateRepository;
     }
 
     public async Task<bool> SendTemporaryPasswordEmailAsync(
@@ -62,9 +63,7 @@ public class EmailService : IEmailService
     {
         try
         {
-            var template = await _context.EmailTemplates
-                .AsNoTracking()
-                .FirstOrDefaultAsync(t => t.TemplateKey == templateKey && t.IsActive && !t.IsDeleted, cancellationToken);
+            var template = await _emailTemplateRepository.GetByTemplateKeyAsync(templateKey, cancellationToken);
 
             if (template == null)
             {

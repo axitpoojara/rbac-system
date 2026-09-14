@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Files;
 using Rbac.Domain.Entities;
@@ -13,16 +13,16 @@ public record GetFilesQuery(int PageNumber = 1, int PageSize = 10, string? Searc
 
 public class GetFilesQueryHandler : IRequestHandler<GetFilesQuery, ApiResponse<PagedResult<FileItemDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetFilesQueryHandler(IAppDbContext context)
+    public GetFilesQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<PagedResult<FileItemDto>>> Handle(GetFilesQuery request, CancellationToken cancellationToken)
     {
-        var query = _context.UploadedFiles.AsNoTracking();
+        var query = _unitOfWork.UploadedFiles.Query(asNoTracking: true);
 
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
@@ -65,11 +65,11 @@ public record UploadFileCommand(
 
 public class UploadFileCommandHandler : IRequestHandler<UploadFileCommand, ApiResponse<FileItemDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public UploadFileCommandHandler(IAppDbContext context)
+    public UploadFileCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<FileItemDto>> Handle(UploadFileCommand command, CancellationToken cancellationToken)
@@ -116,8 +116,8 @@ public class UploadFileCommandHandler : IRequestHandler<UploadFileCommand, ApiRe
             CreatedAtUtc = DateTime.UtcNow
         };
 
-        _context.UploadedFiles.Add(uploadedFile);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.UploadedFiles.AddAsync(uploadedFile, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var dto = new FileItemDto
         {
@@ -139,18 +139,16 @@ public record DownloadFileQuery(Guid Id, string StorageDirectory) : IRequest<Api
 
 public class DownloadFileQueryHandler : IRequestHandler<DownloadFileQuery, ApiResponse<FileDownloadDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public DownloadFileQueryHandler(IAppDbContext context)
+    public DownloadFileQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<FileDownloadDto>> Handle(DownloadFileQuery request, CancellationToken cancellationToken)
     {
-        var fileRecord = await _context.UploadedFiles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(f => f.Id == request.Id, cancellationToken);
+        var fileRecord = await _unitOfWork.UploadedFiles.GetActiveFileByIdAsync(request.Id, cancellationToken);
 
         if (fileRecord == null)
         {
@@ -180,17 +178,16 @@ public record DeleteFileCommand(Guid Id, string StorageDirectory, string? Curren
 
 public class DeleteFileCommandHandler : IRequestHandler<DeleteFileCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public DeleteFileCommandHandler(IAppDbContext context)
+    public DeleteFileCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(DeleteFileCommand command, CancellationToken cancellationToken)
     {
-        var fileRecord = await _context.UploadedFiles
-            .FirstOrDefaultAsync(f => f.Id == command.Id, cancellationToken);
+        var fileRecord = await _unitOfWork.UploadedFiles.GetByIdAsync(command.Id, cancellationToken);
 
         if (fileRecord == null)
         {
@@ -202,18 +199,17 @@ public class DeleteFileCommandHandler : IRequestHandler<DeleteFileCommand, ApiRe
         fileRecord.DeletedAtUtc = DateTime.UtcNow;
         fileRecord.DeletedBy = command.CurrentUserName ?? "Admin";
 
-        _context.AuditLogs.Add(new Domain.Entities.AuditLog
-        {
-            Id = Guid.NewGuid(),
-            UserName = command.CurrentUserName ?? "Admin",
-            Action = "SoftDelete",
-            EntityName = "UploadedFile",
-            EntityId = fileRecord.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"File '{fileRecord.OriginalFileName}' ({fileRecord.ContentType}) was soft-deleted."
-        });
+        _unitOfWork.UploadedFiles.Update(fileRecord);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            command.CurrentUserName ?? "Admin",
+            "SoftDelete",
+            "UploadedFile",
+            fileRecord.Id.ToString(),
+            $"File '{fileRecord.OriginalFileName}' ({fileRecord.ContentType}) was soft-deleted.",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "File deleted successfully");
     }

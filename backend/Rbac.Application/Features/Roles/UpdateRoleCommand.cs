@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Roles;
 using Rbac.Domain.Entities;
@@ -11,11 +11,11 @@ public record UpdateRoleCommand(Guid Id, UpdateRoleDto Request) : IRequest<ApiRe
 
 public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, ApiResponse<RoleDetailDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public UpdateRoleCommandHandler(IAppDbContext context)
+    public UpdateRoleCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<RoleDetailDto>> Handle(UpdateRoleCommand command, CancellationToken cancellationToken)
@@ -23,7 +23,7 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, ApiRe
         var id = command.Id;
         var request = command.Request;
 
-        var role = await _context.Roles
+        var role = await _unitOfWork.Roles.Query(asNoTracking: false)
             .Include(r => r.RolePermissions)
             .Include(r => r.RoleMenus)
             .Include(r => r.UserRoles)
@@ -41,8 +41,8 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, ApiRe
                 return ApiResponse<RoleDetailDto>.Fail("System role names cannot be renamed.");
             }
 
-            var nameExists = await _context.Roles.AnyAsync(r => r.Id != id && r.Name.ToLower() == request.Name.Trim().ToLower(), cancellationToken);
-            if (nameExists)
+            var isUnique = await _unitOfWork.Roles.IsRoleNameUniqueAsync(request.Name.Trim(), id, cancellationToken);
+            if (!isUnique)
             {
                 return ApiResponse<RoleDetailDto>.Fail("A role with this name already exists.");
             }
@@ -54,8 +54,8 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, ApiRe
 
         if (request.PermissionIds != null)
         {
-            _context.RolePermissions.RemoveRange(role.RolePermissions);
-            var validPermIds = await _context.Permissions
+            _unitOfWork.RolePermissions.DeleteRange(role.RolePermissions);
+            var validPermIds = await _unitOfWork.Permissions.Query(asNoTracking: true)
                 .Where(p => request.PermissionIds.Contains(p.Id))
                 .Select(p => p.Id)
                 .ToListAsync(cancellationToken);
@@ -68,8 +68,8 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, ApiRe
 
         if (request.MenuIds != null)
         {
-            _context.RoleMenus.RemoveRange(role.RoleMenus);
-            var validMenuIds = await _context.Menus
+            _unitOfWork.RoleMenus.DeleteRange(role.RoleMenus);
+            var validMenuIds = await _unitOfWork.Menus.Query(asNoTracking: true)
                 .Where(m => request.MenuIds.Contains(m.Id))
                 .Select(m => m.Id)
                 .ToListAsync(cancellationToken);
@@ -80,7 +80,8 @@ public class UpdateRoleCommandHandler : IRequestHandler<UpdateRoleCommand, ApiRe
             }
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        _unitOfWork.Roles.Update(role);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var result = new RoleDetailDto
         {

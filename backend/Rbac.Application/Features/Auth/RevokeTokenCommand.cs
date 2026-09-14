@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Auth;
 using Rbac.Application.DTOs.Common;
 
@@ -10,16 +9,16 @@ public record RevokeTokenCommand(RevokeTokenRequest Request) : IRequest<ApiRespo
 
 public class RevokeTokenCommandHandler : IRequestHandler<RevokeTokenCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public RevokeTokenCommandHandler(IAppDbContext context)
+    public RevokeTokenCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(RevokeTokenCommand request, CancellationToken cancellationToken)
     {
-        var token = await _context.RefreshTokens.FirstOrDefaultAsync(rt => rt.Token == request.Request.RefreshToken, cancellationToken);
+        var token = await _unitOfWork.RefreshTokens.FirstOrDefaultAsync(rt => rt.Token == request.Request.RefreshToken, cancellationToken);
         if (token == null)
         {
             return ApiResponse<bool>.Fail("Token not found");
@@ -28,7 +27,8 @@ public class RevokeTokenCommandHandler : IRequestHandler<RevokeTokenCommand, Api
         if (token.IsActive)
         {
             token.RevokedAtUtc = DateTime.UtcNow;
-            await _context.SaveChangesAsync(cancellationToken);
+            _unitOfWork.RefreshTokens.Update(token);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
         return ApiResponse<bool>.Ok(true, "Token revoked successfully");

@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Menus;
 
@@ -10,16 +10,16 @@ public record GetMenusQuery : IRequest<ApiResponse<List<MenuDto>>>;
 
 public class GetMenusQueryHandler : IRequestHandler<GetMenusQuery, ApiResponse<List<MenuDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetMenusQueryHandler(IAppDbContext context)
+    public GetMenusQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<List<MenuDto>>> Handle(GetMenusQuery request, CancellationToken cancellationToken)
     {
-        var menus = await _context.Menus
+        var menus = await _unitOfWork.Menus.Query(asNoTracking: true)
             .Include(m => m.Parent)
             .OrderBy(m => m.DisplayOrder)
             .Select(m => new MenuDto

@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Roles;
 using Rbac.Domain.Entities;
@@ -11,11 +11,11 @@ public record CreateRoleCommand(CreateRoleDto Request) : IRequest<ApiResponse<Ro
 
 public class CreateRoleCommandHandler : IRequestHandler<CreateRoleCommand, ApiResponse<RoleDetailDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public CreateRoleCommandHandler(IAppDbContext context)
+    public CreateRoleCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<RoleDetailDto>> Handle(CreateRoleCommand command, CancellationToken cancellationToken)
@@ -26,8 +26,8 @@ public class CreateRoleCommandHandler : IRequestHandler<CreateRoleCommand, ApiRe
             return ApiResponse<RoleDetailDto>.Fail("Role name is required.");
         }
 
-        var exists = await _context.Roles.AnyAsync(r => r.Name.ToLower() == request.Name.Trim().ToLower(), cancellationToken);
-        if (exists)
+        var isUnique = await _unitOfWork.Roles.IsRoleNameUniqueAsync(request.Name.Trim(), null, cancellationToken);
+        if (!isUnique)
         {
             return ApiResponse<RoleDetailDto>.Fail("A role with this name already exists.");
         }
@@ -43,7 +43,7 @@ public class CreateRoleCommandHandler : IRequestHandler<CreateRoleCommand, ApiRe
 
         if (request.PermissionIds != null && request.PermissionIds.Any())
         {
-            var validPermIds = await _context.Permissions
+            var validPermIds = await _unitOfWork.Permissions.Query(asNoTracking: true)
                 .Where(p => request.PermissionIds.Contains(p.Id))
                 .Select(p => p.Id)
                 .ToListAsync(cancellationToken);
@@ -56,7 +56,7 @@ public class CreateRoleCommandHandler : IRequestHandler<CreateRoleCommand, ApiRe
 
         if (request.MenuIds != null && request.MenuIds.Any())
         {
-            var validMenuIds = await _context.Menus
+            var validMenuIds = await _unitOfWork.Menus.Query(asNoTracking: true)
                 .Where(m => request.MenuIds.Contains(m.Id))
                 .Select(m => m.Id)
                 .ToListAsync(cancellationToken);
@@ -67,8 +67,8 @@ public class CreateRoleCommandHandler : IRequestHandler<CreateRoleCommand, ApiRe
             }
         }
 
-        _context.Roles.Add(role);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.Roles.AddAsync(role, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var result = new RoleDetailDto
         {

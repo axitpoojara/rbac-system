@@ -1,6 +1,6 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Auth;
 using Rbac.Application.DTOs.Common;
 using Rbac.Domain.Entities;
@@ -11,12 +11,12 @@ public record SetNewPasswordCommand(Guid UserId, SetNewPasswordRequest Request) 
 
 public class SetNewPasswordCommandHandler : IRequestHandler<SetNewPasswordCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
 
-    public SetNewPasswordCommandHandler(IAppDbContext context, IPasswordHasher passwordHasher)
+    public SetNewPasswordCommandHandler(IUnitOfWork unitOfWork, IPasswordHasher passwordHasher)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
     }
 
@@ -38,7 +38,7 @@ public class SetNewPasswordCommandHandler : IRequestHandler<SetNewPasswordComman
             return ApiResponse<bool>.Fail("New password and confirm password do not match.");
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == request.UserId, cancellationToken);
+        var user = await _unitOfWork.Users.GetByIdAsync(request.UserId, cancellationToken);
         if (user == null)
         {
             return ApiResponse<bool>.Fail("User not found.");
@@ -49,19 +49,17 @@ public class SetNewPasswordCommandHandler : IRequestHandler<SetNewPasswordComman
         user.TemporaryPasswordExpiresAtUtc = null;
         user.UpdatedAtUtc = DateTime.UtcNow;
 
-        _context.AuditLogs.Add(new AuditLog
-        {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            UserName = user.UserName,
-            Action = "SetPermanentPassword",
-            EntityName = "User",
-            EntityId = user.Id.ToString(),
-            TimestampUtc = DateTime.UtcNow,
-            Details = $"User '{user.UserName}' completed password onboarding and set their permanent password."
-        });
+        _unitOfWork.Users.Update(user);
 
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.AuditLogs.LogAsync(
+            user.UserName,
+            "SetPermanentPassword",
+            "User",
+            user.Id.ToString(),
+            $"User '{user.UserName}' completed password onboarding and set their permanent password.",
+            cancellationToken);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "Your new password has been set successfully. Welcome aboard!");
     }

@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
 
@@ -10,11 +9,11 @@ public record ToggleUserStatusCommand(Guid Id, ToggleStatusDto Request, Guid? Cu
 
 public class ToggleUserStatusCommandHandler : IRequestHandler<ToggleUserStatusCommand, ApiResponse<bool>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public ToggleUserStatusCommandHandler(IAppDbContext context)
+    public ToggleUserStatusCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<bool>> Handle(ToggleUserStatusCommand command, CancellationToken cancellationToken)
@@ -25,7 +24,7 @@ public class ToggleUserStatusCommandHandler : IRequestHandler<ToggleUserStatusCo
             return ApiResponse<bool>.Fail("You cannot change your own active status.");
         }
 
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+        var user = await _unitOfWork.Users.GetByIdAsync(id, cancellationToken);
         if (user == null)
         {
             return ApiResponse<bool>.Fail("User not found");
@@ -37,17 +36,12 @@ public class ToggleUserStatusCommandHandler : IRequestHandler<ToggleUserStatusCo
 
         if (!user.IsActive)
         {
-            var activeTokens = await _context.RefreshTokens
-                .Where(rt => rt.UserId == user.Id && rt.RevokedAtUtc == null)
-                .ToListAsync(cancellationToken);
-
-            foreach (var t in activeTokens)
-            {
-                t.RevokedAtUtc = DateTime.UtcNow;
-            }
+            await _unitOfWork.RefreshTokens.RevokeUserTokensAsync(user.Id, cancellationToken);
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        _unitOfWork.Users.Update(user);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         return ApiResponse<bool>.Ok(user.IsActive, $"User status updated to {(user.IsActive ? "Active" : "Inactive")}");
     }
 }

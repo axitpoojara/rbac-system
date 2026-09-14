@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Users;
 using Rbac.Domain.Entities;
@@ -11,11 +11,11 @@ public record UpdateUserCommand(Guid Id, UpdateUserDto Request, string UpdatedBy
 
 public class UpdateUserCommandHandler : IRequestHandler<UpdateUserCommand, ApiResponse<UserDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public UpdateUserCommandHandler(IAppDbContext context)
+    public UpdateUserCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<UserDto>> Handle(UpdateUserCommand command, CancellationToken cancellationToken)
@@ -23,7 +23,7 @@ public class UpdateUserCommandHandler : IRequestHandler<UpdateUserCommand, ApiRe
         var id = command.Id;
         var request = command.Request;
 
-        var user = await _context.Users
+        var user = await _unitOfWork.Users.Query(asNoTracking: false)
             .Include(u => u.UserRoles)
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
@@ -34,8 +34,8 @@ public class UpdateUserCommandHandler : IRequestHandler<UpdateUserCommand, ApiRe
 
         if (user.Email.ToLower() != request.Email.Trim().ToLower())
         {
-            var emailExists = await _context.Users.AnyAsync(u => u.Id != id && u.Email.ToLower() == request.Email.Trim().ToLower(), cancellationToken);
-            if (emailExists)
+            var isEmailUnique = await _unitOfWork.Users.IsEmailUniqueAsync(request.Email.Trim(), id, cancellationToken);
+            if (!isEmailUnique)
             {
                 return ApiResponse<UserDto>.Fail("Email is already in use by another user.");
             }
@@ -50,21 +50,14 @@ public class UpdateUserCommandHandler : IRequestHandler<UpdateUserCommand, ApiRe
 
         if (!user.IsActive)
         {
-            var activeTokens = await _context.RefreshTokens
-                .Where(rt => rt.UserId == user.Id && rt.RevokedAtUtc == null)
-                .ToListAsync(cancellationToken);
-
-            foreach (var t in activeTokens)
-            {
-                t.RevokedAtUtc = DateTime.UtcNow;
-            }
+            await _unitOfWork.RefreshTokens.RevokeUserTokensAsync(user.Id, cancellationToken);
         }
 
         if (request.RoleIds != null)
         {
-            _context.UserRoles.RemoveRange(user.UserRoles);
+            _unitOfWork.UserRoles.DeleteRange(user.UserRoles);
 
-            var validRoleIds = await _context.Roles
+            var validRoleIds = await _unitOfWork.Roles.Query(asNoTracking: true)
                 .Where(r => request.RoleIds.Contains(r.Id))
                 .Select(r => r.Id)
                 .ToListAsync(cancellationToken);
@@ -75,9 +68,10 @@ public class UpdateUserCommandHandler : IRequestHandler<UpdateUserCommand, ApiRe
             }
         }
 
-        await _context.SaveChangesAsync(cancellationToken);
+        _unitOfWork.Users.Update(user);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var roles = await _context.Roles
+        var roles = await _unitOfWork.Roles.Query(asNoTracking: true)
             .Where(r => user.UserRoles.Select(ur => ur.RoleId).Contains(r.Id))
             .Select(r => r.Name)
             .ToListAsync(cancellationToken);

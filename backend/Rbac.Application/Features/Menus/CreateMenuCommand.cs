@@ -1,6 +1,5 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Menus;
 using Rbac.Domain.Entities;
@@ -11,11 +10,11 @@ public record CreateMenuCommand(CreateMenuDto Request) : IRequest<ApiResponse<Me
 
 public class CreateMenuCommandHandler : IRequestHandler<CreateMenuCommand, ApiResponse<MenuDto>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public CreateMenuCommandHandler(IAppDbContext context)
+    public CreateMenuCommandHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<MenuDto>> Handle(CreateMenuCommand command, CancellationToken cancellationToken)
@@ -28,7 +27,7 @@ public class CreateMenuCommandHandler : IRequestHandler<CreateMenuCommand, ApiRe
 
         if (request.ParentId.HasValue)
         {
-            var parentExists = await _context.Menus.AnyAsync(m => m.Id == request.ParentId.Value, cancellationToken);
+            var parentExists = await _unitOfWork.Menus.AnyAsync(m => m.Id == request.ParentId.Value, cancellationToken);
             if (!parentExists)
             {
                 return ApiResponse<MenuDto>.Fail("Parent menu does not exist.");
@@ -47,12 +46,15 @@ public class CreateMenuCommandHandler : IRequestHandler<CreateMenuCommand, ApiRe
             IsActive = request.IsActive
         };
 
-        _context.Menus.Add(menu);
-        await _context.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.Menus.AddAsync(menu, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var parentTitle = menu.ParentId.HasValue
-            ? await _context.Menus.Where(m => m.Id == menu.ParentId.Value).Select(m => m.Title).FirstOrDefaultAsync(cancellationToken)
-            : null;
+        string? parentTitle = null;
+        if (menu.ParentId.HasValue)
+        {
+            var parent = await _unitOfWork.Menus.GetByIdAsync(menu.ParentId.Value, cancellationToken);
+            parentTitle = parent?.Title;
+        }
 
         var dto = new MenuDto
         {

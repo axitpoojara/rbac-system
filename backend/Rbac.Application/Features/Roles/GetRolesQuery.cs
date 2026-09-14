@@ -1,6 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Rbac.Application.Common.Interfaces;
+using Rbac.Application.Common.Interfaces.Repositories;
 using Rbac.Application.DTOs.Common;
 using Rbac.Application.DTOs.Roles;
 
@@ -10,16 +10,16 @@ public record GetRolesQuery : IRequest<ApiResponse<List<RoleDto>>>;
 
 public class GetRolesQueryHandler : IRequestHandler<GetRolesQuery, ApiResponse<List<RoleDto>>>
 {
-    private readonly IAppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public GetRolesQueryHandler(IAppDbContext context)
+    public GetRolesQueryHandler(IUnitOfWork unitOfWork)
     {
-        _context = context;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<ApiResponse<List<RoleDto>>> Handle(GetRolesQuery request, CancellationToken cancellationToken)
     {
-        var roles = await _context.Roles
+        var roles = await _unitOfWork.Roles.Query(asNoTracking: true)
             .Include(r => r.UserRoles)
             .Include(r => r.RolePermissions)
             .Include(r => r.RoleMenus)
