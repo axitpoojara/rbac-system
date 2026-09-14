@@ -11,10 +11,15 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "Data Source=rbac.db";
+        var connectionString = configuration.GetConnectionString("DefaultConnection") 
+            ?? "Server=localhost;Port=3306;Database=rbac_db;User=root;Password=root;";
 
         services.AddDbContext<AppDbContext>(options =>
-            options.UseSqlite(connectionString));
+            options.UseMySql(
+                connectionString,
+                new MySqlServerVersion(new Version(8, 0, 36)),
+                mySqlOptions => mySqlOptions.EnableRetryOnFailure()
+            ));
 
         services.AddScoped<IAppDbContext>(provider => provider.GetRequiredService<AppDbContext>());
 

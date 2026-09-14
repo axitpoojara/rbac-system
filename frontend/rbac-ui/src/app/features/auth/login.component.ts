@@ -1,9 +1,41 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AbstractControl, FormBuilder, FormGroup, ReactiveFormsModule, ValidationErrors, ValidatorFn, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ToastService } from '../../core/services/toast.service';
+
+export function noWhitespaceValidator(): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    if (!control.value) return null;
+    const isWhitespace = (control.value || '').toString().trim().length === 0;
+    return isWhitespace ? { whitespaceOnly: true } : null;
+  };
+}
+
+export function userNameOrEmailValidator(): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const value = control.value;
+    if (!value || typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+
+    if (trimmed.includes('@')) {
+      const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!emailPattern.test(trimmed)) {
+        return { invalidEmail: true };
+      }
+    } else {
+      if (trimmed.length < 3) {
+        return { usernameTooShort: { minLength: 3, actualLength: trimmed.length } };
+      }
+      if (/\s/.test(trimmed)) {
+        return { usernameHasSpaces: true };
+      }
+    }
+    return null;
+  };
+}
 
 @Component({
   selector: 'app-login',
@@ -39,8 +71,13 @@ import { ToastService } from '../../core/services/toast.service';
               formControlName="userNameOrEmail"
               placeholder="e.g. admin@gmail.com"
               [class.is-invalid]="f['userNameOrEmail'].touched && f['userNameOrEmail'].invalid">
-            <div *ngIf="f['userNameOrEmail'].touched && f['userNameOrEmail'].errors" class="form-error">
-              Username or email is required.
+            <div *ngIf="getUserNameOrEmailError()" class="form-error">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <span>{{ getUserNameOrEmailError() }}</span>
             </div>
           </div>
 
@@ -69,12 +106,17 @@ import { ToastService } from '../../core/services/toast.service';
                 </svg>
               </button>
             </div>
-            <div *ngIf="f['password'].touched && f['password'].errors" class="form-error">
-              Password is required.
+            <div *ngIf="getPasswordError()" class="form-error">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <span>{{ getPasswordError() }}</span>
             </div>
           </div>
 
-          <button type="submit" class="btn btn-primary btn-block" [disabled]="loading() || loginForm.invalid">
+          <button type="submit" class="btn btn-primary btn-block" [disabled]="loading()">
             <span *ngIf="!loading()">Sign In</span>
             <span *ngIf="loading()">Authenticating...</span>
           </button>
@@ -217,16 +259,62 @@ export class LoginComponent {
   private router = inject(Router);
 
   loginForm: FormGroup = this.fb.group({
-    userNameOrEmail: ['', [Validators.required]],
-    password: ['', [Validators.required]]
+    userNameOrEmail: ['', [
+      Validators.required,
+      noWhitespaceValidator(),
+      userNameOrEmailValidator()
+    ]],
+    password: ['', [
+      Validators.required,
+      noWhitespaceValidator(),
+      Validators.minLength(6)
+    ]]
   });
 
   loading = signal(false);
   errorMessage = signal<string | null>(null);
   showPassword = signal(false);
 
+  constructor() {
+    this.loginForm.valueChanges.subscribe(() => {
+      if (this.errorMessage()) {
+        this.errorMessage.set(null);
+      }
+    });
+  }
+
   get f() {
     return this.loginForm.controls;
+  }
+
+  getUserNameOrEmailError(): string | null {
+    const control = this.f['userNameOrEmail'];
+    if (!control || !control.touched || !control.errors) return null;
+    if (control.errors['required'] || control.errors['whitespaceOnly']) {
+      return 'Username or email is required.';
+    }
+    if (control.errors['invalidEmail']) {
+      return 'Please enter a valid email address.';
+    }
+    if (control.errors['usernameTooShort']) {
+      return 'Username must be at least 3 characters.';
+    }
+    if (control.errors['usernameHasSpaces']) {
+      return 'Username cannot contain spaces.';
+    }
+    return 'Invalid username or email.';
+  }
+
+  getPasswordError(): string | null {
+    const control = this.f['password'];
+    if (!control || !control.touched || !control.errors) return null;
+    if (control.errors['required'] || control.errors['whitespaceOnly']) {
+      return 'Password is required.';
+    }
+    if (control.errors['minlength']) {
+      return 'Password must be at least 6 characters.';
+    }
+    return 'Invalid password.';
   }
 
   fillDemo(user: string, pass: string): void {
@@ -234,19 +322,35 @@ export class LoginComponent {
       userNameOrEmail: user,
       password: pass
     });
+    this.loginForm.markAsUntouched();
+    this.loginForm.markAsPristine();
     this.errorMessage.set(null);
   }
 
   onSubmit(): void {
+    // 1. Mark all fields as touched to trigger inline error messages
+    this.loginForm.markAllAsTouched();
+
+    // 2. Strict frontend validation gate: abort before API call if invalid
     if (this.loginForm.invalid) {
-      this.loginForm.markAllAsTouched();
       return;
     }
 
+    const rawUserNameOrEmail = this.loginForm.get('userNameOrEmail')?.value;
+    const rawPassword = this.loginForm.get('password')?.value;
+
+    const userNameOrEmail = typeof rawUserNameOrEmail === 'string' ? rawUserNameOrEmail.trim() : '';
+    const password = typeof rawPassword === 'string' ? rawPassword : '';
+
+    if (!userNameOrEmail || !password || password.trim().length === 0 || password.length < 6) {
+      return;
+    }
+
+    // 3. Dispatch API call only when all validations pass
     this.loading.set(true);
     this.errorMessage.set(null);
 
-    this.authService.login(this.loginForm.value).subscribe({
+    this.authService.login({ userNameOrEmail, password }).subscribe({
       next: (res) => {
         this.loading.set(false);
         if (res.success) {

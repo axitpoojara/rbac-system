@@ -726,10 +726,24 @@ body {
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
 }
 
+.form-control.is-invalid {
+  border-color: var(--danger) !important;
+  background-color: #fffbfa;
+}
+
+.form-control.is-invalid:focus {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important;
+}
+
 .form-error {
   color: var(--danger);
-  font-size: 0.75rem;
-  margin-top: 0.25rem;
+  font-size: 0.775rem;
+  font-weight: 500;
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .password-input-group {

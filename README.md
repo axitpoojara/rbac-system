@@ -8,7 +8,7 @@ A full-stack, enterprise-grade authentication and role-based access control (RBA
 ## Architecture & Features
 
 - **Backend (.NET 8 Web API)**:
-  - **Entity Framework Core 8** with SQLite (`rbac.db`). Zero external server setup needed.
+  - **Entity Framework Core 8** with MySQL via `Pomelo.EntityFrameworkCore.MySql`.
   - **JWT Authentication** (Short-lived access token, 15m) + **Cryptographic Refresh Token rotation** (7d) with token family reuse detection.
   - **Custom Policy-Based Authorization**: `[HasPermission("Users.View")]` attribute powered by custom `IAuthorizationPolicyProvider` and `PermissionAuthorizationHandler`.
   - **Granular Permissions & Dynamic Navigation**: `/api/menus/nav` computes the dynamic menu tree tailored to each user's assigned roles and capabilities.
