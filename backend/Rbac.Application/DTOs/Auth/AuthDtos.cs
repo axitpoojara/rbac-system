@@ -27,10 +27,22 @@ public class AuthResponse
     public UserDto User { get; set; } = null!;
     public List<string> Roles { get; set; } = new();
     public List<string> Permissions { get; set; } = new();
+    public bool MustChangePassword { get; set; } = false;
 }
 
 public class ChangePasswordRequest
 {
     public string CurrentPassword { get; set; } = string.Empty;
     public string NewPassword { get; set; } = string.Empty;
+}
+
+public class RequestTempPasswordRequest
+{
+    public string Email { get; set; } = string.Empty;
+}
+
+public class SetNewPasswordRequest
+{
+    public string NewPassword { get; set; } = string.Empty;
+    public string ConfirmPassword { get; set; } = string.Empty;
 }

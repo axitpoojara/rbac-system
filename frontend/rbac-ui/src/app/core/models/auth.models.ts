@@ -9,6 +9,7 @@ export interface User {
   createdAtUtc: string;
   roles: string[];
   roleIds: string[];
+  mustChangePassword?: boolean;
 }
 
 export interface AuthResponse {
@@ -18,6 +19,7 @@ export interface AuthResponse {
   user: User;
   roles: string[];
   permissions: string[];
+  mustChangePassword?: boolean;
 }
 
 export interface LoginRequest {
@@ -33,4 +35,13 @@ export interface RefreshTokenRequest {
 export interface ChangePasswordRequest {
   currentPassword: string;
   newPassword: string;
+}
+
+export interface RequestTempPasswordRequest {
+  email: string;
+}
+
+export interface SetNewPasswordRequest {
+  newPassword: string;
+  confirmPassword: string;
 }

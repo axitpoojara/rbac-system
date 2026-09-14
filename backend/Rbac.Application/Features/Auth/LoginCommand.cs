@@ -49,6 +49,11 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, ApiResponse<Aut
             return ApiResponse<AuthResponse>.Fail("Your account has been deactivated. Please contact an administrator.");
         }
 
+        if (user.MustChangePassword && user.TemporaryPasswordExpiresAtUtc.HasValue && user.TemporaryPasswordExpiresAtUtc.Value < DateTime.UtcNow)
+        {
+            return ApiResponse<AuthResponse>.Fail("Your temporary password has expired. Please request a new one.");
+        }
+
         var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
         var permissions = user.UserRoles
             .SelectMany(ur => ur.Role.RolePermissions)
@@ -67,6 +72,7 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, ApiResponse<Aut
             AccessToken = accessToken,
             RefreshToken = refreshToken.Token,
             ExpiresAt = refreshToken.ExpiresAtUtc,
+            MustChangePassword = user.MustChangePassword,
             User = new UserDto
             {
                 Id = user.Id,

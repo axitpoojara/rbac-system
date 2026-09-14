@@ -485,6 +485,26 @@ CREATE TABLE IF NOT EXISTS `UploadedFiles` (
                     }
                 }
             }
+
+            // User-specific onboarding columns
+            var userColumns = new[]
+            {
+                ("MustChangePassword", "tinyint(1) NOT NULL DEFAULT 0"),
+                ("TemporaryPasswordExpiresAtUtc", "datetime(6) NULL")
+            };
+
+            foreach (var (colName, colDef) in userColumns)
+            {
+                using var checkCmd = connection.CreateCommand();
+                checkCmd.CommandText = $"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Users' AND COLUMN_NAME = '{colName}'";
+                var count = Convert.ToInt32(await checkCmd.ExecuteScalarAsync());
+                if (count == 0)
+                {
+                    using var alterCmd = connection.CreateCommand();
+                    alterCmd.CommandText = $"ALTER TABLE `Users` ADD COLUMN `{colName}` {colDef};";
+                    await alterCmd.ExecuteNonQueryAsync();
+                }
+            }
         }
         finally
         {

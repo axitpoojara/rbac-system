@@ -9,9 +9,31 @@ export const authGuard: CanActivateFn = () => {
   const router = inject(Router);
 
   if (authService.isAuthenticated() || tokenService.hasToken()) {
+    if (authService.mustChangePassword()) {
+      router.navigate(['/set-password']);
+      return false;
+    }
     return true;
   }
 
   router.navigate(['/login']);
   return false;
+};
+
+export const setPasswordGuard: CanActivateFn = () => {
+  const authService = inject(AuthService);
+  const tokenService = inject(TokenService);
+  const router = inject(Router);
+
+  if (!authService.isAuthenticated() && !tokenService.hasToken()) {
+    router.navigate(['/login']);
+    return false;
+  }
+
+  if (!authService.mustChangePassword()) {
+    router.navigate(['/dashboard']);
+    return false;
+  }
+
+  return true;
 };

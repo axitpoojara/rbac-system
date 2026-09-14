@@ -21,6 +21,10 @@ public class User : ISoftDelete
     public DateTime? DeletedAtUtc { get; set; }
     public string? DeletedBy { get; set; }
 
+    // Temporary password & onboarding
+    public bool MustChangePassword { get; set; } = false;
+    public DateTime? TemporaryPasswordExpiresAtUtc { get; set; }
+
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

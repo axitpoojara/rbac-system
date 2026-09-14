@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Observable, tap, catchError, throwError, of } from 'rxjs';
-import { AuthResponse, LoginRequest, RefreshTokenRequest, User } from '../models/auth.models';
+import { AuthResponse, LoginRequest, RefreshTokenRequest, RequestTempPasswordRequest, SetNewPasswordRequest, User } from '../models/auth.models';
 import { ApiResponse } from '../models/rbac.models';
 import { TokenService } from './token.service';
 
@@ -25,6 +25,9 @@ export class AuthService {
   private _permissions = signal<string[]>([]);
   public permissions = this._permissions.asReadonly();
 
+  private _mustChangePassword = signal<boolean>(false);
+  public mustChangePassword = this._mustChangePassword.asReadonly();
+
   public isAuthenticated = computed(() => !!this._currentUser() && !!this.tokenService.getAccessToken());
 
   constructor() {
@@ -35,12 +38,14 @@ export class AuthService {
     const savedUser = localStorage.getItem('rbac_user');
     const savedRoles = localStorage.getItem('rbac_roles');
     const savedPermissions = localStorage.getItem('rbac_permissions');
+    const savedMustChange = localStorage.getItem('rbac_must_change');
 
     if (savedUser && this.tokenService.hasToken()) {
       try {
         this._currentUser.set(JSON.parse(savedUser));
         if (savedRoles) this._roles.set(JSON.parse(savedRoles));
         if (savedPermissions) this._permissions.set(JSON.parse(savedPermissions));
+        if (savedMustChange === 'true') this._mustChangePassword.set(true);
       } catch {
         this.clearLocalData();
       }
@@ -99,14 +104,35 @@ export class AuthService {
           this._currentUser.set(res.data.user);
           this._roles.set(res.data.roles);
           this._permissions.set(res.data.permissions);
+          const mustChange = !!res.data.mustChangePassword;
+          this._mustChangePassword.set(mustChange);
 
           localStorage.setItem('rbac_user', JSON.stringify(res.data.user));
           localStorage.setItem('rbac_roles', JSON.stringify(res.data.roles));
           localStorage.setItem('rbac_permissions', JSON.stringify(res.data.permissions));
+          localStorage.setItem('rbac_must_change', String(mustChange));
         }
       }),
       catchError(err => {
         return throwError(() => err);
+      })
+    );
+  }
+
+  requestTemporaryPassword(email: string): Observable<ApiResponse<boolean>> {
+    return this.http.post<ApiResponse<boolean>>(`${this.API_URL}/request-temp-password`, { email });
+  }
+
+  setNewPassword(request: SetNewPasswordRequest): Observable<ApiResponse<boolean>> {
+    return this.http.post<ApiResponse<boolean>>(`${this.API_URL}/set-new-password`, request).pipe(
+      tap(res => {
+        if (res.success) {
+          this._mustChangePassword.set(false);
+          localStorage.setItem('rbac_must_change', 'false');
+          if (this._currentUser()) {
+            this._currentUser.update(user => user ? { ...user, mustChangePassword: false } : null);
+          }
+        }
       })
     );
   }
@@ -116,10 +142,13 @@ export class AuthService {
     this._currentUser.set(data.user);
     this._roles.set(data.roles);
     this._permissions.set(data.permissions);
+    const mustChange = !!data.mustChangePassword;
+    this._mustChangePassword.set(mustChange);
 
     localStorage.setItem('rbac_user', JSON.stringify(data.user));
     localStorage.setItem('rbac_roles', JSON.stringify(data.roles));
     localStorage.setItem('rbac_permissions', JSON.stringify(data.permissions));
+    localStorage.setItem('rbac_must_change', String(mustChange));
   }
 
   private clearLocalData(): void {
@@ -127,9 +156,11 @@ export class AuthService {
     this._currentUser.set(null);
     this._roles.set([]);
     this._permissions.set([]);
+    this._mustChangePassword.set(false);
     localStorage.removeItem('rbac_user');
     localStorage.removeItem('rbac_roles');
     localStorage.removeItem('rbac_permissions');
+    localStorage.removeItem('rbac_must_change');
   }
 
   hasPermission(permission: string): boolean {

@@ -71,6 +71,13 @@ public class AuthController : ControllerBase
         return HandleResult(result);
     }
 
+    [HttpPost("request-temp-password")]
+    public async Task<ActionResult<ApiResponse<bool>>> RequestTemporaryPassword([FromBody] RequestTempPasswordRequest request)
+    {
+        var result = await _mediator.Send(new RequestTemporaryPasswordCommand(request));
+        return HandleResult(result);
+    }
+
     [Authorize]
     [HttpPost("change-password")]
     public async Task<ActionResult<ApiResponse<bool>>> ChangePassword([FromBody] ChangePasswordRequest request)
@@ -82,6 +89,20 @@ public class AuthController : ControllerBase
         }
 
         var result = await _mediator.Send(new ChangePasswordCommand(userId, request));
+        return HandleResult(result);
+    }
+
+    [Authorize]
+    [HttpPost("set-new-password")]
+    public async Task<ActionResult<ApiResponse<bool>>> SetNewPassword([FromBody] SetNewPasswordRequest request)
+    {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdStr, out var userId))
+        {
+            return Unauthorized(ApiResponse<bool>.Fail("Invalid token."));
+        }
+
+        var result = await _mediator.Send(new SetNewPasswordCommand(userId, request));
         return HandleResult(result);
     }
 

@@ -56,7 +56,8 @@ public class GetCurrentUserQueryHandler : IRequestHandler<GetCurrentUserQuery, A
                 RoleIds = user.UserRoles.Select(ur => ur.RoleId).ToList()
             },
             Roles = roles,
-            Permissions = permissions
+            Permissions = permissions,
+            MustChangePassword = user.MustChangePassword
         };
 
         return ApiResponse<AuthResponse>.Ok(response);

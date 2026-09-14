@@ -25,6 +25,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtService, JwtService>();
+        services.AddScoped<IEmailService, Rbac.Infrastructure.Services.EmailService>();
 
         return services;
     }
