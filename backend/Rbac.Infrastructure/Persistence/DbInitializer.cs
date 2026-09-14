@@ -26,6 +26,27 @@ CREATE TABLE IF NOT EXISTS `UploadedFiles` (
     `DeletedBy` varchar(50) NULL,
     CONSTRAINT `PK_UploadedFiles` PRIMARY KEY (`Id`)
 ) CHARACTER SET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `EmailTemplates` (
+    `Id` char(36) COLLATE ascii_general_ci NOT NULL,
+    `TemplateKey` varchar(100) CHARACTER SET utf8mb4 NOT NULL,
+    `Name` varchar(150) CHARACTER SET utf8mb4 NOT NULL,
+    `Description` varchar(300) CHARACTER SET utf8mb4 NULL,
+    `Subject` varchar(250) CHARACTER SET utf8mb4 NOT NULL,
+    `BodyHtml` longtext CHARACTER SET utf8mb4 NOT NULL,
+    `AvailableVariables` varchar(500) CHARACTER SET utf8mb4 NULL,
+    `IsActive` tinyint(1) NOT NULL DEFAULT 1,
+    `IsSystemTemplate` tinyint(1) NOT NULL DEFAULT 0,
+    `CreatedAtUtc` datetime(6) NOT NULL,
+    `CreatedBy` varchar(50) NULL,
+    `UpdatedAtUtc` datetime(6) NULL,
+    `UpdatedBy` varchar(50) NULL,
+    `IsDeleted` tinyint(1) NOT NULL DEFAULT 0,
+    `DeletedAtUtc` datetime(6) NULL,
+    `DeletedBy` varchar(50) NULL,
+    CONSTRAINT `PK_EmailTemplates` PRIMARY KEY (`Id`),
+    UNIQUE KEY `IX_EmailTemplates_TemplateKey` (`TemplateKey`)
+) CHARACTER SET=utf8mb4;
 ");
 
         // Soft delete schema migration for existing MySQL tables
@@ -60,6 +81,12 @@ CREATE TABLE IF NOT EXISTS `UploadedFiles` (
             new() { Id = Guid.NewGuid(), Code = "Files.Upload", Name = "Upload Files", Module = "Files", Description = "Can upload new files to the system" },
             new() { Id = Guid.NewGuid(), Code = "Files.Download", Name = "Download Files", Module = "Files", Description = "Can download files from the system" },
             new() { Id = Guid.NewGuid(), Code = "Files.Delete", Name = "Delete Files", Module = "Files", Description = "Can delete uploaded files" },
+
+            // Email Templates
+            new() { Id = Guid.NewGuid(), Code = "EmailTemplates.View", Name = "View Email Templates", Module = "EmailTemplates", Description = "Can view system email templates" },
+            new() { Id = Guid.NewGuid(), Code = "EmailTemplates.Create", Name = "Create Email Templates", Module = "EmailTemplates", Description = "Can create new email templates" },
+            new() { Id = Guid.NewGuid(), Code = "EmailTemplates.Update", Name = "Update Email Templates", Module = "EmailTemplates", Description = "Can modify email templates content and settings" },
+            new() { Id = Guid.NewGuid(), Code = "EmailTemplates.Delete", Name = "Delete Email Templates", Module = "EmailTemplates", Description = "Can remove email templates" },
         };
 
         foreach (var perm in permissions)
@@ -294,6 +321,24 @@ CREATE TABLE IF NOT EXISTS `UploadedFiles` (
             await context.SaveChangesAsync();
         }
 
+        var emailTemplatesSubMenu = await context.Menus.FirstOrDefaultAsync(m => m.Title == "Email Templates" && m.ParentId == systemParent.Id);
+        if (emailTemplatesSubMenu == null)
+        {
+            emailTemplatesSubMenu = new Menu
+            {
+                Id = Guid.NewGuid(),
+                Title = "Email Templates",
+                Route = "/system/email-templates",
+                Icon = "mail",
+                ParentId = systemParent.Id,
+                DisplayOrder = 3,
+                RequiredPermission = "EmailTemplates.View",
+                IsActive = true
+            };
+            context.Menus.Add(emailTemplatesSubMenu);
+            await context.SaveChangesAsync();
+        }
+
         var filesMenu = await context.Menus.FirstOrDefaultAsync(m => m.Route == "/files");
         if (filesMenu == null)
         {
@@ -448,12 +493,15 @@ CREATE TABLE IF NOT EXISTS `UploadedFiles` (
             context.Users.Add(disabledUser);
         }
 
+        // Seed default Email Templates
+        await SeedEmailTemplatesAsync(context);
+
         await context.SaveChangesAsync();
     }
 
     private static async Task EnsureSoftDeleteColumnsAsync(AppDbContext context)
     {
-        var tables = new[] { "Users", "Roles", "Menus", "UploadedFiles", "Permissions" };
+        var tables = new[] { "Users", "Roles", "Menus", "UploadedFiles", "Permissions", "EmailTemplates" };
         var columns = new[]
         {
             ("IsDeleted", "tinyint(1) NOT NULL DEFAULT 0"),
@@ -513,5 +561,162 @@ CREATE TABLE IF NOT EXISTS `UploadedFiles` (
                 await connection.CloseAsync();
             }
         }
+    }
+
+    private static async Task SeedEmailTemplatesAsync(AppDbContext context)
+    {
+        // 1. Temporary Password Template
+        if (!await context.EmailTemplates.IgnoreQueryFilters().AnyAsync(t => t.TemplateKey == "TemporaryPassword"))
+        {
+            context.EmailTemplates.Add(new EmailTemplate
+            {
+                Id = Guid.NewGuid(),
+                TemplateKey = "TemporaryPassword",
+                Name = "Temporary Login Password",
+                Description = "Dispatched when a user requests access via temporary one-time password.",
+                Subject = "Your Temporary Access Password - {{CompanyName}}",
+                AvailableVariables = "{{UserName}}, {{Email}}, {{TempPassword}}, {{ExpirationMinutes}}, {{CompanyName}}, {{LoginUrl}}",
+                IsActive = true,
+                IsSystemTemplate = true,
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = "System",
+                BodyHtml = @"<div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);"">
+  <div style=""background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); padding: 32px 24px; text-align: center;"">
+    <h1 style=""color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;"">{{CompanyName}}</h1>
+    <p style=""color: #c7d2fe; margin: 8px 0 0; font-size: 14px;"">Secure Account Authentication</p>
+  </div>
+  
+  <div style=""padding: 32px 28px;"">
+    <h2 style=""color: #1e293b; font-size: 18px; font-weight: 600; margin-top: 0;"">Hello {{UserName}},</h2>
+    <p style=""color: #475569; font-size: 15px; line-height: 1.6; margin-bottom: 24px;"">
+      A temporary password was requested for your account (<strong>{{Email}}</strong>). Please use the credentials below to log into your portal:
+    </p>
+
+    <div style=""background-color: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0;"">
+      <span style=""font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; display: block; margin-bottom: 8px;"">Your Temporary Password</span>
+      <span style=""font-family: 'Consolas', 'Courier New', monospace; font-size: 24px; font-weight: 700; color: #1e293b; letter-spacing: 2px; display: inline-block; background: #ffffff; padding: 8px 24px; border-radius: 6px; border: 1px solid #e2e8f0;"">{{TempPassword}}</span>
+    </div>
+
+    <div style=""background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; margin-bottom: 24px; border-radius: 4px;"">
+      <p style=""margin: 0; color: #92400e; font-size: 13px; line-height: 1.5;"">
+        <strong>Security Notice:</strong> This password is valid for <strong>{{ExpirationMinutes}} minutes</strong>. For your security, you will be required to set a new permanent password immediately upon logging in.
+      </p>
+    </div>
+
+    <div style=""text-align: center; margin: 30px 0 10px;"">
+      <a href=""{{LoginUrl}}"" style=""display: inline-block; background: #4f46e5; color: #ffffff; padding: 12px 32px; border-radius: 6px; font-size: 14px; font-weight: 600; text-decoration: none; box-shadow: 0 2px 4px rgba(79, 70, 229, 0.3);"">Login to Portal</a>
+    </div>
+
+    <p style=""color: #94a3b8; font-size: 13px; line-height: 1.5; margin-top: 28px;"">
+      If you did not request this temporary password, please contact your system administrator immediately.
+    </p>
+  </div>
+
+  <div style=""background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center; color: #94a3b8; font-size: 12px;"">
+    &copy; {{CompanyName}} RBAC System. All rights reserved.
+  </div>
+</div>"
+            });
+        }
+
+        // 2. Reset Password Template
+        if (!await context.EmailTemplates.IgnoreQueryFilters().AnyAsync(t => t.TemplateKey == "ResetPassword"))
+        {
+            context.EmailTemplates.Add(new EmailTemplate
+            {
+                Id = Guid.NewGuid(),
+                TemplateKey = "ResetPassword",
+                Name = "Password Reset Request",
+                Description = "Dispatched when a user requests to reset their password.",
+                Subject = "Reset Your Password - {{CompanyName}}",
+                AvailableVariables = "{{UserName}}, {{Email}}, {{ResetLink}}, {{ExpirationMinutes}}, {{CompanyName}}",
+                IsActive = true,
+                IsSystemTemplate = true,
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = "System",
+                BodyHtml = @"<div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);"">
+  <div style=""background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); padding: 32px 24px; text-align: center;"">
+    <h1 style=""color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;"">{{CompanyName}}</h1>
+    <p style=""color: #bae6fd; margin: 8px 0 0; font-size: 14px;"">Password Reset Request</p>
+  </div>
+  
+  <div style=""padding: 32px 28px;"">
+    <h2 style=""color: #1e293b; font-size: 18px; font-weight: 600; margin-top: 0;"">Hello {{UserName}},</h2>
+    <p style=""color: #475569; font-size: 15px; line-height: 1.6; margin-bottom: 24px;"">
+      We received a request to reset the password for your account (<strong>{{Email}}</strong>). Click the button below to establish a new password:
+    </p>
+
+    <div style=""text-align: center; margin: 30px 0;"">
+      <a href=""{{ResetLink}}"" style=""display: inline-block; background: #0284c7; color: #ffffff; padding: 14px 36px; border-radius: 6px; font-size: 15px; font-weight: 600; text-decoration: none; box-shadow: 0 2px 4px rgba(2, 132, 199, 0.3);"">Reset My Password</a>
+    </div>
+
+    <div style=""background-color: #f0f9ff; border-left: 4px solid #0284c7; padding: 12px 16px; margin-bottom: 24px; border-radius: 4px;"">
+      <p style=""margin: 0; color: #0369a1; font-size: 13px; line-height: 1.5;"">
+        This link is valid for <strong>{{ExpirationMinutes}} minutes</strong>. If you did not make this request, you can safely ignore this email.
+      </p>
+    </div>
+
+    <p style=""color: #94a3b8; font-size: 12px; line-height: 1.5; margin-top: 24px;"">
+      If the button above does not work, copy and paste this link into your browser:<br/>
+      <a href=""{{ResetLink}}"" style=""color: #0284c7; word-break: break-all;"">{{ResetLink}}</a>
+    </p>
+  </div>
+
+  <div style=""background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center; color: #94a3b8; font-size: 12px;"">
+    &copy; {{CompanyName}} RBAC System. All rights reserved.
+  </div>
+</div>"
+            });
+        }
+
+        // 3. Welcome User Template
+        if (!await context.EmailTemplates.IgnoreQueryFilters().AnyAsync(t => t.TemplateKey == "WelcomeUser"))
+        {
+            context.EmailTemplates.Add(new EmailTemplate
+            {
+                Id = Guid.NewGuid(),
+                TemplateKey = "WelcomeUser",
+                Name = "Welcome New User",
+                Description = "Dispatched when a new user account is onboarded.",
+                Subject = "Welcome to {{CompanyName}}!",
+                AvailableVariables = "{{UserName}}, {{Email}}, {{PortalUrl}}, {{CompanyName}}",
+                IsActive = true,
+                IsSystemTemplate = true,
+                CreatedAtUtc = DateTime.UtcNow,
+                CreatedBy = "System",
+                BodyHtml = @"<div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);"">
+  <div style=""background: linear-gradient(135deg, #10b981 0%, #047857 100%); padding: 32px 24px; text-align: center;"">
+    <h1 style=""color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;"">{{CompanyName}}</h1>
+    <p style=""color: #a7f3d0; margin: 8px 0 0; font-size: 14px;"">Welcome to the Platform</p>
+  </div>
+  
+  <div style=""padding: 32px 28px;"">
+    <h2 style=""color: #1e293b; font-size: 18px; font-weight: 600; margin-top: 0;"">Welcome, {{UserName}}!</h2>
+    <p style=""color: #475569; font-size: 15px; line-height: 1.6; margin-bottom: 24px;"">
+      Your account has been successfully configured on <strong>{{CompanyName}}</strong>. You now have secure access to your assigned portal modules and resources.
+    </p>
+
+    <div style=""background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0;"">
+      <p style=""margin: 4px 0; color: #475569; font-size: 14px;""><strong>Account Login:</strong> {{Email}}</p>
+      <p style=""margin: 4px 0; color: #475569; font-size: 14px;""><strong>Access Status:</strong> Active</p>
+    </div>
+
+    <div style=""text-align: center; margin: 30px 0;"">
+      <a href=""{{PortalUrl}}"" style=""display: inline-block; background: #10b981; color: #ffffff; padding: 14px 36px; border-radius: 6px; font-size: 15px; font-weight: 600; text-decoration: none; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);"">Access Your Portal</a>
+    </div>
+
+    <p style=""color: #94a3b8; font-size: 13px; line-height: 1.5; margin-top: 24px;"">
+      If you have any questions or require assistance, please contact your security administrator.
+    </p>
+  </div>
+
+  <div style=""background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center; color: #94a3b8; font-size: 12px;"">
+    &copy; {{CompanyName}} RBAC System. All rights reserved.
+  </div>
+</div>"
+            });
+        }
+
+        await context.SaveChangesAsync();
     }
 }

@@ -1,5 +1,7 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Mail;
+using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Rbac.Application.Common.Interfaces;
@@ -10,17 +12,94 @@ public class EmailService : IEmailService
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<EmailService> _logger;
+    private readonly IAppDbContext _context;
 
-    public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
+    public EmailService(
+        IConfiguration configuration, 
+        ILogger<EmailService> logger,
+        IAppDbContext context)
     {
         _configuration = configuration;
         _logger = logger;
+        _context = context;
     }
 
     public async Task<bool> SendTemporaryPasswordEmailAsync(
         string toEmail, 
         string userName, 
         string temporaryPassword, 
+        CancellationToken cancellationToken = default)
+    {
+        var senderName = _configuration["EmailSettings:SenderName"] ?? "Enterprise RBAC Security";
+        var placeholders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "UserName", userName },
+            { "Email", toEmail },
+            { "TempPassword", temporaryPassword },
+            { "ExpirationMinutes", "30" },
+            { "CompanyName", senderName },
+            { "LoginUrl", "http://localhost:4200/login" }
+        };
+
+        var sent = await SendTemplatedEmailAsync(toEmail, "TemporaryPassword", placeholders, cancellationToken);
+        if (!sent)
+        {
+            // Fallback to hardcoded template if DB template is missing or inactive
+            _logger.LogWarning("Template 'TemporaryPassword' not found or failed in DB; dispatching with default built-in template.");
+            var fallbackSubject = $"Your Temporary Access Password - {senderName}";
+            var fallbackHtml = GetDefaultTemporaryPasswordHtml(userName, toEmail, temporaryPassword, senderName);
+            return await SendRawEmailAsync(toEmail, fallbackSubject, fallbackHtml, cancellationToken);
+        }
+
+        return true;
+    }
+
+    public async Task<bool> SendTemplatedEmailAsync(
+        string toEmail, 
+        string templateKey, 
+        IDictionary<string, string> placeholders, 
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var template = await _context.EmailTemplates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.TemplateKey == templateKey && t.IsActive && !t.IsDeleted, cancellationToken);
+
+            if (template == null)
+            {
+                return false;
+            }
+
+            var subject = template.Subject;
+            var bodyHtml = template.BodyHtml;
+
+            // Substitute placeholders
+            foreach (var kvp in placeholders)
+            {
+                var pattern = @"\{\{\s*" + Regex.Escape(kvp.Key) + @"\s*\}\}";
+                subject = Regex.Replace(subject, pattern, kvp.Value ?? string.Empty, RegexOptions.IgnoreCase);
+                bodyHtml = Regex.Replace(bodyHtml, pattern, kvp.Value ?? string.Empty, RegexOptions.IgnoreCase);
+            }
+
+            // Also ensure {{CompanyName}} has a default value if missing
+            var defaultCompanyName = _configuration["EmailSettings:SenderName"] ?? "Enterprise RBAC Security";
+            subject = Regex.Replace(subject, @"\{\{\s*CompanyName\s*\}\}", defaultCompanyName, RegexOptions.IgnoreCase);
+            bodyHtml = Regex.Replace(bodyHtml, @"\{\{\s*CompanyName\s*\}\}", defaultCompanyName, RegexOptions.IgnoreCase);
+
+            return await SendRawEmailAsync(toEmail, subject, bodyHtml, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing templated email for key '{TemplateKey}' to '{ToEmail}'.", templateKey, toEmail);
+            return false;
+        }
+    }
+
+    public async Task<bool> SendRawEmailAsync(
+        string toEmail, 
+        string subject, 
+        string htmlBody, 
         CancellationToken cancellationToken = default)
     {
         var smtpHost = _configuration["EmailSettings:SmtpHost"];
@@ -30,27 +109,58 @@ public class EmailService : IEmailService
         var senderEmail = _configuration["EmailSettings:SenderEmail"] ?? "axitpoojara1501@gmail.com";
         var senderName = _configuration["EmailSettings:SenderName"] ?? "Enterprise RBAC Security";
 
-        var emailSubject = "Your Temporary Access Password - Enterprise RBAC";
-        var plainTextBody = $@"
-Hello {userName},
+        // Always log email dispatch for developer visibility and audit
+        _logger.LogInformation(
+            "\n======================================================\n" +
+            "[EMAIL DISPATCH]\n" +
+            "From: {SenderEmail} ({SenderName})\n" +
+            "To: {ToEmail}\n" +
+            "Subject: {Subject}\n" +
+            "======================================================",
+            senderEmail, senderName, toEmail, subject);
 
-A temporary password was generated for your account ({toEmail}).
+        if (!string.IsNullOrWhiteSpace(smtpHost) &&
+            int.TryParse(smtpPortStr, out var smtpPort) &&
+            !string.IsNullOrWhiteSpace(smtpUser) &&
+            !string.IsNullOrWhiteSpace(smtpPass))
+        {
+            try
+            {
+                using var client = new SmtpClient(smtpHost, smtpPort)
+                {
+                    Credentials = new NetworkCredential(smtpUser, smtpPass),
+                    EnableSsl = true
+                };
 
---------------------------------------------------
-Temporary Password: {temporaryPassword}
---------------------------------------------------
+                var mailMessage = new MailMessage
+                {
+                    From = new MailAddress(senderEmail, senderName),
+                    Subject = subject,
+                    Body = htmlBody,
+                    IsBodyHtml = true
+                };
+                mailMessage.To.Add(toEmail);
 
-Please log in using this temporary password. You will be required to set your permanent password upon initial login.
-This temporary password expires in 30 minutes.
+                await client.SendMailAsync(mailMessage, cancellationToken);
+                _logger.LogInformation("SMTP email successfully delivered from {SenderEmail} to {ToEmail}.", senderEmail, toEmail);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Gmail SMTP dispatch from {SenderEmail} to {ToEmail} failed: {Message}", senderEmail, toEmail, ex.Message);
+                return false;
+            }
+        }
+        else
+        {
+            _logger.LogInformation("Real email sender configured as '{SenderEmail}'. SMTP credentials missing or incomplete.", senderEmail);
+            return true;
+        }
+    }
 
-Sent from: {senderEmail}
-If you did not request this, please contact your system administrator immediately.
-
-Regards,
-Enterprise RBAC Security Team";
-
-        var htmlBody = $@"
-<!DOCTYPE html>
+    private string GetDefaultTemporaryPasswordHtml(string userName, string toEmail, string temporaryPassword, string companyName)
+    {
+        return $@"<!DOCTYPE html>
 <html>
 <head>
     <meta charset='utf-8'>
@@ -70,7 +180,7 @@ Enterprise RBAC Security Team";
 <body>
     <div class='card'>
         <div class='header'>
-            <h2 class='title'>Enterprise RBAC System</h2>
+            <h2 class='title'>{companyName}</h2>
             <div class='badge'>Temporary Verification Password</div>
         </div>
         <p class='info'>Hello <strong>{userName}</strong>,</p>
@@ -83,63 +193,11 @@ Enterprise RBAC Security Team";
         </div>
         <p class='info'>If you did not request this, please contact your security administrator.</p>
         <div class='footer'>
-            Sent by Enterprise RBAC Platform from <strong>{senderEmail}</strong><br>
+            Sent by {companyName}<br>
             Please do not share this password with anyone.
         </div>
     </div>
 </body>
 </html>";
-
-        // Always log to server output for developer accessibility, audit, and local testing
-        _logger.LogInformation(
-            "\n======================================================\n" +
-            "[EMAIL DISPATCH - TEMPORARY ONBOARDING PASSWORD]\n" +
-            "From: {SenderEmail} ({SenderName})\n" +
-            "To: {ToEmail} ({UserName})\n" +
-            "Subject: {Subject}\n" +
-            "Temporary Password: {TempPassword}\n" +
-            "Expires: In 30 Minutes\n" +
-            "======================================================",
-            senderEmail, senderName, toEmail, userName, emailSubject, temporaryPassword);
-
-        // Attempt actual SMTP dispatch if credentials configured
-        if (!string.IsNullOrWhiteSpace(smtpHost) &&
-            int.TryParse(smtpPortStr, out var smtpPort) &&
-            !string.IsNullOrWhiteSpace(smtpUser) &&
-            !string.IsNullOrWhiteSpace(smtpPass))
-        {
-            try
-            {
-                using var client = new SmtpClient(smtpHost, smtpPort)
-                {
-                    Credentials = new NetworkCredential(smtpUser, smtpPass),
-                    EnableSsl = true
-                };
-
-                var mailMessage = new MailMessage
-                {
-                    From = new MailAddress(senderEmail, senderName),
-                    Subject = emailSubject,
-                    Body = htmlBody,
-                    IsBodyHtml = true
-                };
-                mailMessage.To.Add(toEmail);
-
-                await client.SendMailAsync(mailMessage, cancellationToken);
-                _logger.LogInformation("SMTP email successfully delivered from {SenderEmail} to {ToEmail}.", senderEmail, toEmail);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Gmail SMTP dispatch from {SenderEmail} to {ToEmail} encountered an error: {Message}. (Make sure a 16-character Google App Password is used in appsettings.json).", senderEmail, toEmail, ex.Message);
-                return true;
-            }
-        }
-        else
-        {
-            _logger.LogInformation("Real email sender configured as '{SenderEmail}'. To enable direct inbox delivery via Gmail SMTP, provide your Google App Password in backend/RbacApi/appsettings.json under 'EmailSettings:SmtpPassword'.", senderEmail);
-        }
-
-        return true;
     }
 }

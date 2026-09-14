@@ -62,6 +62,12 @@ export const routes: Routes = [
         loadComponent: () => import('./features/permissions/permissions.component').then(m => m.PermissionsComponent),
         canActivate: [permissionGuard],
         data: { permission: 'Permissions.View' }
+      },
+      {
+        path: 'system/email-templates',
+        loadComponent: () => import('./features/email-templates/email-templates.component').then(m => m.EmailTemplatesComponent),
+        canActivate: [permissionGuard],
+        data: { permission: 'EmailTemplates.View' }
       }
     ]
   },

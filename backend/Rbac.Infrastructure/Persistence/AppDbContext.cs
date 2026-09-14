@@ -21,6 +21,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
+    public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -51,6 +52,13 @@ public class AppDbContext : DbContext, IAppDbContext
         modelBuilder.Entity<Menu>().HasQueryFilter(m => !m.IsDeleted);
         modelBuilder.Entity<UploadedFile>().HasQueryFilter(f => !f.IsDeleted);
         modelBuilder.Entity<Permission>().HasQueryFilter(p => !p.IsDeleted);
+        modelBuilder.Entity<EmailTemplate>().HasQueryFilter(e => !e.IsDeleted);
+
+        // Dependent Entity Query Filters (Matching Principal Filters)
+        modelBuilder.Entity<RefreshToken>().HasQueryFilter(rt => !rt.User.IsDeleted);
+        modelBuilder.Entity<UserRole>().HasQueryFilter(ur => !ur.User.IsDeleted && !ur.Role.IsDeleted);
+        modelBuilder.Entity<RoleMenu>().HasQueryFilter(rm => !rm.Role.IsDeleted && !rm.Menu.IsDeleted);
+        modelBuilder.Entity<RolePermission>().HasQueryFilter(rp => !rp.Role.IsDeleted && !rp.Permission.IsDeleted);
 
         // User
         modelBuilder.Entity<User>(entity =>
@@ -175,6 +183,19 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.Property(f => f.StoredFileName).HasMaxLength(255).IsRequired();
             entity.Property(f => f.ContentType).HasMaxLength(100).IsRequired();
             entity.Property(f => f.UploadedByUserName).HasMaxLength(50).IsRequired();
+        });
+
+        // EmailTemplate
+        modelBuilder.Entity<EmailTemplate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.TemplateKey).IsUnique();
+            entity.Property(e => e.TemplateKey).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(150).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(300);
+            entity.Property(e => e.Subject).HasMaxLength(250).IsRequired();
+            entity.Property(e => e.BodyHtml).IsRequired();
+            entity.Property(e => e.AvailableVariables).HasMaxLength(500);
         });
     }
 }
