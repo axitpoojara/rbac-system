@@ -74,7 +74,8 @@ public class RolesController : ControllerBase
     [HasPermission("Roles.Manage")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteRole(Guid id)
     {
-        var result = await _mediator.Send(new DeleteRoleCommand(id));
+        var currentUserName = User.Identity?.Name ?? "Admin";
+        var result = await _mediator.Send(new DeleteRoleCommand(id, currentUserName));
         if (!result.Success)
         {
             if (result.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))

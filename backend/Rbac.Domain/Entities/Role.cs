@@ -1,6 +1,8 @@
+using Rbac.Domain.Common;
+
 namespace Rbac.Domain.Entities;
 
-public class Role
+public class Role : ISoftDelete
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
@@ -8,6 +10,11 @@ public class Role
     public bool IsSystemRole { get; set; } = false;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAtUtc { get; set; }
+
+    // Soft delete
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAtUtc { get; set; }
+    public string? DeletedBy { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
     public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();

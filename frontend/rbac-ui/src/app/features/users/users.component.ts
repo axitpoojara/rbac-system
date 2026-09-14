@@ -293,7 +293,7 @@ import { User } from '../../core/models/auth.models';
     <app-confirm-modal
       [isOpen]="isDeleteModalOpen"
       title="Delete User"
-      [message]="'Are you sure you want to permanently delete user ' + (userToDelete?.userName || '') + '?'"
+      [message]="'Are you sure you want to delete user ' + (userToDelete?.userName || '') + '? The user will be deactivated and archived.'"
       confirmText="Delete"
       confirmButtonClass="btn-danger"
       (confirmed)="executeDelete()"

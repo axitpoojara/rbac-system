@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Subscription } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { AuthService } from '../core/services/auth.service';
@@ -15,9 +16,9 @@ import { NavMenuItem } from '../core/models/rbac.models';
   template: `
     <div class="app-container">
       <!-- Dynamic Sidebar -->
-      <aside class="sidebar">
+      <aside class="sidebar" [class.collapsed]="isSidebarCollapsed()">
         <div class="sidebar-header">
-          <div class="sidebar-brand-icon">
+          <div class="sidebar-brand-icon" (click)="toggleSidebar()" style="cursor: pointer;" [title]="isSidebarCollapsed() ? 'Expand Sidebar' : 'Collapse Sidebar'">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
               <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
@@ -41,25 +42,27 @@ import { NavMenuItem } from '../core/models/rbac.models';
             <a *ngIf="!item.children || item.children.length === 0" 
                [routerLink]="item.route" 
                routerLinkActive="active" 
-               class="nav-item">
+               class="nav-item"
+               [title]="item.title">
               <span class="nav-item-icon" [innerHTML]="getMenuIcon(item.icon)"></span>
               <span class="nav-item-title">{{ item.title }}</span>
             </a>
 
             <!-- Parent Item (with children) -->
             <div *ngIf="item.children && item.children.length > 0" class="nav-group">
-              <div class="nav-item nav-item-parent" (click)="toggleSubmenu(item.id)">
+              <div class="nav-item nav-item-parent" (click)="handleParentClick(item)" [title]="item.title">
                 <span class="nav-item-icon" [innerHTML]="getMenuIcon(item.icon)"></span>
                 <span class="nav-item-title">{{ item.title }}</span>
                 <span class="nav-item-arrow" [class.open]="isSubmenuOpen(item.id)">▶</span>
               </div>
-              <div class="subnav-list" *ngIf="isSubmenuOpen(item.id)">
+              <div class="subnav-list" *ngIf="isSubmenuOpen(item.id) || isSidebarCollapsed()">
                 <a *ngFor="let child of item.children" 
                    [routerLink]="child.route" 
                    routerLinkActive="active" 
-                   class="subnav-item">
+                   class="subnav-item"
+                   [title]="child.title">
                   <span class="nav-item-icon" [innerHTML]="getMenuIcon(child.icon)"></span>
-                  <span>{{ child.title }}</span>
+                  <span class="subnav-title">{{ child.title }}</span>
                 </a>
               </div>
             </div>
@@ -73,7 +76,7 @@ import { NavMenuItem } from '../core/models/rbac.models';
         <!-- Sidebar Footer Status -->
         <div class="sidebar-footer">
           <div class="sidebar-user-card">
-            <div class="sidebar-avatar">{{ userInitials }}</div>
+            <div class="sidebar-avatar" [title]="(currentUser()?.fullName || currentUser()?.userName) + ' (' + primaryRole + ')'">{{ userInitials }}</div>
             <div class="sidebar-user-details">
               <div class="sidebar-user-name">{{ currentUser()?.fullName || currentUser()?.userName }}</div>
               <div class="sidebar-session-status">
@@ -89,8 +92,20 @@ import { NavMenuItem } from '../core/models/rbac.models';
       <div class="main-wrapper">
         <!-- Modern Executive Topbar -->
         <header class="topbar">
-          <!-- Left: Breadcrumb Navigation & Route Context -->
+          <!-- Left: Toggle & Breadcrumb Navigation -->
           <div class="topbar-left">
+            <button 
+              class="btn-sidebar-toggle" 
+              (click)="toggleSidebar()" 
+              [title]="isSidebarCollapsed() ? 'Expand Sidebar' : 'Collapse Sidebar'"
+              type="button">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+                <path *ngIf="!isSidebarCollapsed()" d="M15 15l-3-3 3-3"></path>
+                <path *ngIf="isSidebarCollapsed()" d="M13 9l3 3-3 3"></path>
+              </svg>
+            </button>
             <div class="topbar-context">
               <div class="topbar-breadcrumb">
                 <span class="breadcrumb-item breadcrumb-home">
@@ -191,6 +206,7 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
   private navService = inject(NavigationService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private sanitizer = inject(DomSanitizer);
 
   currentUser = this.authService.currentUser;
   roles = this.authService.roles;
@@ -199,6 +215,7 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
   toasts = this.toastService.toasts;
 
   currentUrl = signal<string>(this.router.url);
+  isSidebarCollapsed = signal<boolean>(localStorage.getItem('rbac_sidebar_collapsed') === 'true');
   private routerSub?: Subscription;
 
   openSubmenus: { [key: string]: boolean } = {};
@@ -219,6 +236,14 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
         section: 'Access Control',
         icon: 'shield',
         description: 'Hierarchical roles & granular permission mapping'
+      };
+    }
+    if (url.includes('/files')) {
+      return {
+        title: 'File Management',
+        section: 'Document Center',
+        icon: 'files',
+        description: 'Upload, download, and manage system documents and assets'
       };
     }
     if (url.includes('/system/menus')) {
@@ -292,6 +317,22 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
     return !!this.openSubmenus[id];
   }
 
+  toggleSidebar(): void {
+    const next = !this.isSidebarCollapsed();
+    this.isSidebarCollapsed.set(next);
+    localStorage.setItem('rbac_sidebar_collapsed', String(next));
+  }
+
+  handleParentClick(item: NavMenuItem): void {
+    if (this.isSidebarCollapsed()) {
+      this.isSidebarCollapsed.set(false);
+      this.openSubmenus[item.id] = true;
+      localStorage.setItem('rbac_sidebar_collapsed', 'false');
+    } else {
+      this.toggleSubmenu(item.id);
+    }
+  }
+
   logout(): void {
     this.toastService.info('Logging out...');
     this.authService.logout();
@@ -301,24 +342,38 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
     this.toastService.remove(id);
   }
 
-  getMenuIcon(iconKey: string): string {
+  getMenuIcon(iconKey: string): SafeHtml {
+    let svg = '';
     switch (iconKey?.toLowerCase()) {
       case 'dashboard':
-        return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>`;
+        svg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>`;
+        break;
       case 'users':
-        return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+        svg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+        break;
       case 'user':
-        return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`;
+        svg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`;
+        break;
       case 'shield':
-        return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`;
+        svg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`;
+        break;
+      case 'files':
+      case 'file':
+        svg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+        break;
       case 'settings':
-        return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+        svg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+        break;
       case 'menu':
-        return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>`;
+        svg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>`;
+        break;
       case 'key':
-        return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6"></path><path d="m15.5 7.5 3 3L22 7l-3-3"></path></svg>`;
+        svg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6"></path><path d="m15.5 7.5 3 3L22 7l-3-3"></path></svg>`;
+        break;
       default:
-        return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>`;
+        svg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>`;
+        break;
     }
+    return this.sanitizer.bypassSecurityTrustHtml(svg);
   }
 }

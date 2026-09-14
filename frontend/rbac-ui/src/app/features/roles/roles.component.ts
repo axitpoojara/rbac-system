@@ -211,7 +211,7 @@ import { Menu, ModulePermissions, Role, RoleDetail } from '../../core/models/rba
     <app-confirm-modal
       [isOpen]="isDeleteModalOpen"
       title="Delete Role"
-      [message]="'Are you sure you want to permanently delete role ' + (roleToDelete?.name || '') + '?'"
+      [message]="'Are you sure you want to delete role ' + (roleToDelete?.name || '') + '? The role will be archived.'"
       confirmText="Delete Role"
       confirmButtonClass="btn-danger"
       (confirmed)="executeDelete()"

@@ -14,6 +14,7 @@ public interface IAppDbContext
     DbSet<RoleMenu> RoleMenus { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
     DbSet<AuditLog> AuditLogs { get; }
+    DbSet<UploadedFile> UploadedFiles { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

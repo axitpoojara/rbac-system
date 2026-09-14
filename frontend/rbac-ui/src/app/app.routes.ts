@@ -36,6 +36,12 @@ export const routes: Routes = [
         data: { permission: 'Roles.View' }
       },
       {
+        path: 'files',
+        loadComponent: () => import('./features/files/files.component').then(m => m.FilesComponent),
+        canActivate: [permissionGuard],
+        data: { permission: 'Files.View' }
+      },
+      {
         path: 'system',
         redirectTo: 'system/menus',
         pathMatch: 'full'

@@ -1,6 +1,8 @@
+using Rbac.Domain.Common;
+
 namespace Rbac.Domain.Entities;
 
-public class Menu
+public class Menu : ISoftDelete
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = string.Empty;
@@ -13,6 +15,11 @@ public class Menu
     public int DisplayOrder { get; set; } = 0;
     public string? RequiredPermission { get; set; }
     public bool IsActive { get; set; } = true;
+
+    // Soft delete
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAtUtc { get; set; }
+    public string? DeletedBy { get; set; }
 
     public ICollection<RoleMenu> RoleMenus { get; set; } = new List<RoleMenu>();
 }

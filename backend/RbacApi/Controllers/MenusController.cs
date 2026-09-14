@@ -75,7 +75,8 @@ public class MenusController : ControllerBase
     [HasPermission("Menus.Manage")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteMenu(Guid id)
     {
-        var result = await _mediator.Send(new DeleteMenuCommand(id));
+        var currentUserName = User.Identity?.Name ?? "Admin";
+        var result = await _mediator.Send(new DeleteMenuCommand(id, currentUserName));
         if (!result.Success)
         {
             if (result.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))

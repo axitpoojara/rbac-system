@@ -5,7 +5,7 @@ using Rbac.Application.DTOs.Common;
 
 namespace Rbac.Application.Features.Users;
 
-public record DeleteUserCommand(Guid Id, Guid? CurrentUserId) : IRequest<ApiResponse<bool>>;
+public record DeleteUserCommand(Guid Id, Guid? CurrentUserId, string? CurrentUserName = null) : IRequest<ApiResponse<bool>>;
 
 public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand, ApiResponse<bool>>
 {
@@ -39,7 +39,23 @@ public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand, ApiRe
             return ApiResponse<bool>.Fail("SuperAdmin user accounts cannot be deleted.");
         }
 
-        _context.Users.Remove(user);
+        user.IsDeleted = true;
+        user.DeletedAtUtc = DateTime.UtcNow;
+        user.DeletedBy = command.CurrentUserName ?? "Admin";
+        user.IsActive = false;
+
+        _context.AuditLogs.Add(new Domain.Entities.AuditLog
+        {
+            Id = Guid.NewGuid(),
+            UserId = command.CurrentUserId,
+            UserName = command.CurrentUserName ?? "Admin",
+            Action = "SoftDelete",
+            EntityName = "User",
+            EntityId = user.Id.ToString(),
+            TimestampUtc = DateTime.UtcNow,
+            Details = $"User '{user.UserName}' ({user.Email}) was soft-deleted."
+        });
+
         await _context.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "User deleted successfully");

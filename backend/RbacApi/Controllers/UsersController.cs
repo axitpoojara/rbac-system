@@ -104,8 +104,9 @@ public class UsersController : ControllerBase
     {
         var currentUserIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         Guid? currentUserId = Guid.TryParse(currentUserIdStr, out var parsedId) ? parsedId : null;
+        var currentUserName = User.Identity?.Name ?? "Admin";
 
-        var result = await _mediator.Send(new DeleteUserCommand(id, currentUserId));
+        var result = await _mediator.Send(new DeleteUserCommand(id, currentUserId, currentUserName));
         if (!result.Success)
         {
             if (result.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))

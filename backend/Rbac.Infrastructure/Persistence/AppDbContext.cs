@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Rbac.Application.Common.Interfaces;
+using Rbac.Domain.Common;
 using Rbac.Domain.Entities;
 
 namespace Rbac.Infrastructure.Persistence;
@@ -19,10 +20,37 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<RoleMenu> RoleMenus => Set<RoleMenu>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        ApplySoftDelete();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void ApplySoftDelete()
+    {
+        foreach (var entry in ChangeTracker.Entries<ISoftDelete>())
+        {
+            if (entry.State == EntityState.Deleted)
+            {
+                entry.State = EntityState.Modified;
+                entry.Entity.IsDeleted = true;
+                entry.Entity.DeletedAtUtc = DateTime.UtcNow;
+            }
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Global Query Filters for Soft Delete
+        modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
+        modelBuilder.Entity<Role>().HasQueryFilter(r => !r.IsDeleted);
+        modelBuilder.Entity<Menu>().HasQueryFilter(m => !m.IsDeleted);
+        modelBuilder.Entity<UploadedFile>().HasQueryFilter(f => !f.IsDeleted);
+        modelBuilder.Entity<Permission>().HasQueryFilter(p => !p.IsDeleted);
 
         // User
         modelBuilder.Entity<User>(entity =>
@@ -137,6 +165,16 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.HasKey(a => a.Id);
             entity.Property(a => a.Action).HasMaxLength(50).IsRequired();
             entity.Property(a => a.EntityName).HasMaxLength(50).IsRequired();
+        });
+
+        // UploadedFile
+        modelBuilder.Entity<UploadedFile>(entity =>
+        {
+            entity.HasKey(f => f.Id);
+            entity.Property(f => f.OriginalFileName).HasMaxLength(255).IsRequired();
+            entity.Property(f => f.StoredFileName).HasMaxLength(255).IsRequired();
+            entity.Property(f => f.ContentType).HasMaxLength(100).IsRequired();
+            entity.Property(f => f.UploadedByUserName).HasMaxLength(50).IsRequired();
         });
     }
 }

@@ -5,7 +5,7 @@ using Rbac.Application.DTOs.Common;
 
 namespace Rbac.Application.Features.Roles;
 
-public record DeleteRoleCommand(Guid Id) : IRequest<ApiResponse<bool>>;
+public record DeleteRoleCommand(Guid Id, string? CurrentUserName = null) : IRequest<ApiResponse<bool>>;
 
 public class DeleteRoleCommandHandler : IRequestHandler<DeleteRoleCommand, ApiResponse<bool>>
 {
@@ -37,7 +37,21 @@ public class DeleteRoleCommandHandler : IRequestHandler<DeleteRoleCommand, ApiRe
             return ApiResponse<bool>.Fail("Cannot delete a role that is assigned to users. Unassign it first.");
         }
 
-        _context.Roles.Remove(role);
+        role.IsDeleted = true;
+        role.DeletedAtUtc = DateTime.UtcNow;
+        role.DeletedBy = request.CurrentUserName ?? "Admin";
+
+        _context.AuditLogs.Add(new Domain.Entities.AuditLog
+        {
+            Id = Guid.NewGuid(),
+            UserName = request.CurrentUserName ?? "Admin",
+            Action = "SoftDelete",
+            EntityName = "Role",
+            EntityId = role.Id.ToString(),
+            TimestampUtc = DateTime.UtcNow,
+            Details = $"Role '{role.Name}' was soft-deleted."
+        });
+
         await _context.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.Ok(true, "Role deleted successfully");

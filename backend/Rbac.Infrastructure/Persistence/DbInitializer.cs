@@ -10,6 +10,27 @@ public static class DbInitializer
     {
         await context.Database.EnsureCreatedAsync();
 
+        // Ensure UploadedFiles table exists
+        await context.Database.ExecuteSqlRawAsync(@"
+CREATE TABLE IF NOT EXISTS `UploadedFiles` (
+    `Id` char(36) COLLATE ascii_general_ci NOT NULL,
+    `OriginalFileName` varchar(255) CHARACTER SET utf8mb4 NOT NULL,
+    `StoredFileName` varchar(255) CHARACTER SET utf8mb4 NOT NULL,
+    `ContentType` varchar(100) CHARACTER SET utf8mb4 NOT NULL,
+    `FileSize` bigint NOT NULL,
+    `UploadedByUserId` char(36) COLLATE ascii_general_ci NOT NULL,
+    `UploadedByUserName` varchar(50) CHARACTER SET utf8mb4 NOT NULL,
+    `CreatedAtUtc` datetime(6) NOT NULL,
+    `IsDeleted` tinyint(1) NOT NULL DEFAULT 0,
+    `DeletedAtUtc` datetime(6) NULL,
+    `DeletedBy` varchar(50) NULL,
+    CONSTRAINT `PK_UploadedFiles` PRIMARY KEY (`Id`)
+) CHARACTER SET=utf8mb4;
+");
+
+        // Soft delete schema migration for existing MySQL tables
+        await EnsureSoftDeleteColumnsAsync(context);
+
         // 1. Seed Permissions
         var permissions = new List<Permission>
         {
@@ -33,6 +54,12 @@ public static class DbInitializer
             // Menus
             new() { Id = Guid.NewGuid(), Code = "Menus.View", Name = "View Menus", Module = "Menus", Description = "Can view system navigation menu configurations" },
             new() { Id = Guid.NewGuid(), Code = "Menus.Manage", Name = "Manage Menus", Module = "Menus", Description = "Can create, update, reorder, and delete system menus" },
+
+            // Files
+            new() { Id = Guid.NewGuid(), Code = "Files.View", Name = "View Files", Module = "Files", Description = "Can view the list and details of uploaded files" },
+            new() { Id = Guid.NewGuid(), Code = "Files.Upload", Name = "Upload Files", Module = "Files", Description = "Can upload new files to the system" },
+            new() { Id = Guid.NewGuid(), Code = "Files.Download", Name = "Download Files", Module = "Files", Description = "Can download files from the system" },
+            new() { Id = Guid.NewGuid(), Code = "Files.Delete", Name = "Delete Files", Module = "Files", Description = "Can delete uploaded files" },
         };
 
         foreach (var perm in permissions)
@@ -107,8 +134,8 @@ public static class DbInitializer
             }
         }
 
-        // Manager gets Users.*, Roles.View, Dashboard.View
-        var managerPermCodes = new[] { "Dashboard.View", "Users.View", "Users.Create", "Users.Edit", "Roles.View" };
+        // Manager gets Users.*, Roles.View, Dashboard.View, Files.*
+        var managerPermCodes = new[] { "Dashboard.View", "Users.View", "Users.Create", "Users.Edit", "Roles.View", "Files.View", "Files.Upload", "Files.Download", "Files.Delete" };
         var managerPerms = allDbPermissions.Where(p => managerPermCodes.Contains(p.Code)).ToList();
         var existingManagerPermIds = await context.RolePermissions
             .Where(rp => rp.RoleId == managerRole.Id)
@@ -123,14 +150,19 @@ public static class DbInitializer
             }
         }
 
-        // Employee gets Dashboard.View
-        var employeePerm = allDbPermissions.FirstOrDefault(p => p.Code == "Dashboard.View");
-        if (employeePerm != null)
+        // Employee gets Dashboard.View, Files.View, Files.Download
+        var employeePermCodes = new[] { "Dashboard.View", "Files.View", "Files.Download" };
+        var employeePerms = allDbPermissions.Where(p => employeePermCodes.Contains(p.Code)).ToList();
+        var existingEmployeePermIds = await context.RolePermissions
+            .Where(rp => rp.RoleId == employeeRole.Id)
+            .Select(rp => rp.PermissionId)
+            .ToListAsync();
+
+        foreach (var perm in employeePerms)
         {
-            var hasEmployeePerm = await context.RolePermissions.AnyAsync(rp => rp.RoleId == employeeRole.Id && rp.PermissionId == employeePerm.Id);
-            if (!hasEmployeePerm)
+            if (!existingEmployeePermIds.Contains(perm.Id))
             {
-                context.RolePermissions.Add(new RolePermission { RoleId = employeeRole.Id, PermissionId = employeePerm.Id });
+                context.RolePermissions.Add(new RolePermission { RoleId = employeeRole.Id, PermissionId = perm.Id });
             }
         }
         await context.SaveChangesAsync();
@@ -262,6 +294,24 @@ public static class DbInitializer
             await context.SaveChangesAsync();
         }
 
+        var filesMenu = await context.Menus.FirstOrDefaultAsync(m => m.Route == "/files");
+        if (filesMenu == null)
+        {
+            filesMenu = new Menu
+            {
+                Id = Guid.NewGuid(),
+                Title = "File Management",
+                Route = "/files",
+                Icon = "files",
+                ParentId = null,
+                DisplayOrder = 3,
+                RequiredPermission = "Files.View",
+                IsActive = true
+            };
+            context.Menus.Add(filesMenu);
+            await context.SaveChangesAsync();
+        }
+
         // 5. Assign Menus to Roles
         var allMenus = await context.Menus.ToListAsync();
 
@@ -279,8 +329,8 @@ public static class DbInitializer
             }
         }
 
-        // Manager gets Dashboard, User Management, Users, Roles & Permissions
-        var managerMenuRoutes = new[] { "/dashboard", "/users", "/roles" };
+        // Manager gets Dashboard, User Management, Users, Roles & Permissions, Files
+        var managerMenuRoutes = new[] { "/dashboard", "/users", "/roles", "/files" };
         var managerMenus = allMenus.Where(m => managerMenuRoutes.Contains(m.Route) || m.Id == userMgmtParent.Id).ToList();
         var existingManagerMenuIds = await context.RoleMenus
             .Where(rm => rm.RoleId == managerRole.Id)
@@ -295,12 +345,20 @@ public static class DbInitializer
             }
         }
 
-        // Employee gets Dashboard
-        var existingEmployeeMenu = await context.RoleMenus
-            .AnyAsync(rm => rm.RoleId == employeeRole.Id && rm.MenuId == dashboardMenu.Id);
-        if (!existingEmployeeMenu)
+        // Employee gets Dashboard and Files
+        var employeeMenuRoutes = new[] { "/dashboard", "/files" };
+        var employeeMenus = allMenus.Where(m => employeeMenuRoutes.Contains(m.Route)).ToList();
+        var existingEmployeeMenuIds = await context.RoleMenus
+            .Where(rm => rm.RoleId == employeeRole.Id)
+            .Select(rm => rm.MenuId)
+            .ToListAsync();
+
+        foreach (var m in employeeMenus)
         {
-            context.RoleMenus.Add(new RoleMenu { RoleId = employeeRole.Id, MenuId = dashboardMenu.Id });
+            if (!existingEmployeeMenuIds.Contains(m.Id))
+            {
+                context.RoleMenus.Add(new RoleMenu { RoleId = employeeRole.Id, MenuId = m.Id });
+            }
         }
 
         await context.SaveChangesAsync();
@@ -391,5 +449,49 @@ public static class DbInitializer
         }
 
         await context.SaveChangesAsync();
+    }
+
+    private static async Task EnsureSoftDeleteColumnsAsync(AppDbContext context)
+    {
+        var tables = new[] { "Users", "Roles", "Menus", "UploadedFiles", "Permissions" };
+        var columns = new[]
+        {
+            ("IsDeleted", "tinyint(1) NOT NULL DEFAULT 0"),
+            ("DeletedAtUtc", "datetime(6) NULL"),
+            ("DeletedBy", "varchar(50) NULL")
+        };
+
+        var connection = context.Database.GetDbConnection();
+        var wasClosed = connection.State == System.Data.ConnectionState.Closed;
+        if (wasClosed)
+        {
+            await connection.OpenAsync();
+        }
+
+        try
+        {
+            foreach (var table in tables)
+            {
+                foreach (var (colName, colDef) in columns)
+                {
+                    using var checkCmd = connection.CreateCommand();
+                    checkCmd.CommandText = $"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND COLUMN_NAME = '{colName}'";
+                    var count = Convert.ToInt32(await checkCmd.ExecuteScalarAsync());
+                    if (count == 0)
+                    {
+                        using var alterCmd = connection.CreateCommand();
+                        alterCmd.CommandText = $"ALTER TABLE `{table}` ADD COLUMN `{colName}` {colDef};";
+                        await alterCmd.ExecuteNonQueryAsync();
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (wasClosed)
+            {
+                await connection.CloseAsync();
+            }
+        }
     }
 }
